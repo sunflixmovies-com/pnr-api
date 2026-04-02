@@ -89,55 +89,56 @@ button:hover {
 <script>
 function checkPNR() {
   let pnr = document.getElementById("pnr").value.trim();
-  let loader = document.getElementById("loader");
   let result = document.getElementById("result");
+  let loader = document.getElementById("loader");
 
   if (!pnr || pnr.length < 10) {
-    alert("Enter valid 10-digit PNR");
+    alert("Enter valid PNR");
     return;
   }
 
   loader.style.display = "block";
   result.innerHTML = "";
 
-  fetch("https://pnr-api-0hf4.onrender.com/pnr-status?pnr=" + pnr + "&t=" + new Date().getTime())
+  fetch("https://pnr-api-0hf4.onrender.com/pnr-status?pnr=" + pnr + "&t=" + Date.now())
     .then(res => res.json())
     .then(data => {
-      console.log("REAL DATA:", data);
+
+      console.log("DATA:", data);
 
       loader.style.display = "none";
 
+      // 🔥 IMPORTANT FIX
+      let d = data.data || data;
+
+      if (!d || !d.trainName) {
+        result.innerHTML = "❌ No data found";
+        return;
+      }
+
       let html = `
-        <div class="card"><b>🚆 Train:</b> ${data.trainName || "N/A"}</div>
-        <div class="card"><b>🔢 Train No:</b> ${data.trainNum || "N/A"}</div>
-        <div class="card"><b>📍 From:</b> ${data.stationFrom || "N/A"}</div>
-        <div class="card"><b>📍 To:</b> ${data.stationTo || "N/A"}</div>
-        <div class="card"><b>📅 Journey:</b> ${data.departureDate || "N/A"}</div>
+        <div class="card">🚆 Train: ${d.trainName}</div>
+        <div class="card">🔢 Number: ${d.trainNum}</div>
+        <div class="card">📍 From: ${d.stationFrom}</div>
+        <div class="card">📍 To: ${d.stationTo}</div>
       `;
 
-      // Passenger Status
-      if (data.passengerList && data.passengerList.length > 0) {
-        html += `<h3>👥 Passenger Status</h3>`;
-
-        data.passengerList.forEach(p => {
-          let status = p.currentStatus || "N/A";
-          let color = status.includes("CNF") ? "green" : "red";
-
+      // 🔥 CORRECT passenger fields
+      if (d.passengerList && Array.isArray(d.passengerList)) {
+        d.passengerList.forEach(p => {
           html += `
-            <div class="card ${color}">
-              Passenger ${p.passengerSerialNumber}: ${status}
+            <div class="card">
+              Passenger ${p.passengerSerialNumber}: ${p.currentStatus}
             </div>
           `;
         });
-      } else {
-        html += `<div class="card">No passenger data</div>`;
       }
 
       result.innerHTML = html;
     })
     .catch(err => {
       loader.style.display = "none";
-      result.innerHTML = "❌ Error fetching data";
+      result.innerHTML = "❌ Error loading data";
     });
 }
 </script>
