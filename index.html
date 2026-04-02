@@ -100,7 +100,7 @@ function checkPNR() {
   loader.style.display = "block";
   result.innerHTML = "";
 
-  fetch("https://pnr-api-0hf4.onrender.com/pnr-status?pnr=" + pnr)
+  fetch("https://pnr-api-0hf4.onrender.com/pnr-status?pnr=" + pnr + "&t=" + new Date().getTime())
     .then(res => res.json())
     .then(data => {
       console.log("REAL DATA:", data);
