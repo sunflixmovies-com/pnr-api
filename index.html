@@ -1,23 +1,25 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<title>PNR Checker</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="UTF-8">
+<title>PNR Status Checker</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
 body {
+  margin: 0;
   font-family: Arial;
-  background: #0f2027;
+  background: linear-gradient(135deg, #141e30, #243b55);
   color: white;
-  text-align: center;
 }
 
 .container {
-  max-width: 400px;
-  margin: 50px auto;
-  background: #1e2a38;
+  max-width: 420px;
+  margin: 60px auto;
   padding: 20px;
-  border-radius: 10px;
+  background: #1e2a38;
+  border-radius: 12px;
+  text-align: center;
 }
 
 input, button {
@@ -31,14 +33,32 @@ input, button {
 button {
   background: #00c6ff;
   color: white;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #0072ff;
+}
+
+.loader {
+  display: none;
+  margin-top: 10px;
+}
+
+.result {
+  margin-top: 20px;
+  text-align: left;
 }
 
 .card {
   background: #0f1a24;
   padding: 10px;
-  margin-top: 10px;
-  border-radius: 6px;
+  margin-bottom: 10px;
+  border-radius: 8px;
 }
+
+.green { color: #00ff99; }
+.red { color: #ff4d4d; }
 </style>
 </head>
 
@@ -47,38 +67,57 @@ button {
 <div class="container">
   <h2>🚆 PNR Status</h2>
 
-  <input type="text" id="pnr" placeholder="Enter PNR">
-  <button onclick="checkPNR()">Check</button>
+  <input type="text" id="pnr" placeholder="Enter 10-digit PNR">
 
-  <div id="result"></div>
+  <button onclick="checkPNR()">Check Status</button>
+
+  <div class="loader" id="loader">🔄 Checking...</div>
+
+  <div id="result" class="result"></div>
 </div>
 
 <script>
 function checkPNR() {
-  let pnr = document.getElementById("pnr").value;
+  let pnr = document.getElementById("pnr").value.trim();
+  let loader = document.getElementById("loader");
   let result = document.getElementById("result");
 
-  result.innerHTML = "Checking...";
+  if (!pnr || pnr.length < 10) {
+    alert("Enter valid 10-digit PNR");
+    return;
+  }
+
+  loader.style.display = "block";
+  result.innerHTML = "";
 
   fetch("https://pnr-api-0hf4.onrender.com/pnr-status?pnr=" + pnr)
     .then(res => res.json())
     .then(data => {
+      console.log("API:", data);
 
-      console.log(data);
+      loader.style.display = "none";
+
+      // 🔥 main data
+      let d = data;
 
       let html = `
-        <div class="card">Train: ${data.trainName}</div>
-        <div class="card">Number: ${data.trainNum}</div>
-        <div class="card">From: ${data.stationFrom}</div>
-        <div class="card">To: ${data.stationTo}</div>
+        <div class="card"><b>🚆 Train:</b> ${d.trainName || "N/A"}</div>
+        <div class="card"><b>🔢 Train No:</b> ${d.trainNum || "N/A"}</div>
+        <div class="card"><b>📍 From:</b> ${d.stationFrom || "N/A"}</div>
+        <div class="card"><b>📍 To:</b> ${d.stationTo || "N/A"}</div>
       `;
 
-      // passenger list
-      if (data.passengerList) {
-        data.passengerList.forEach(p => {
+      // 👥 Passenger List
+      if (d.passengerList && d.passengerList.length > 0) {
+        html += `<h3>👥 Passenger Status</h3>`;
+
+        d.passengerList.forEach(p => {
+          let status = p.currentStatus || "N/A";
+          let color = status.includes("CNF") ? "green" : "red";
+
           html += `
-            <div class="card">
-              Passenger ${p.serialNo}: ${p.seatStts}
+            <div class="card ${color}">
+              Passenger ${p.passengerSerialNumber}: ${status}
             </div>
           `;
         });
@@ -86,8 +125,9 @@ function checkPNR() {
 
       result.innerHTML = html;
     })
-    .catch(() => {
-      result.innerHTML = "❌ Error";
+    .catch(err => {
+      loader.style.display = "none";
+      result.innerHTML = "❌ Error fetching data";
     });
 }
 </script>
