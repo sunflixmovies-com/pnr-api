@@ -14,7 +14,7 @@ app.get('/', (req, res) => {
 
 // ✅ PNR API route
 app.get('/pnr-status', async (req, res) => {
-  res.setHeader("Cache-Control", "no-store");
+res.setHeader("Cache-Control", "no-store");
   const pnr = req.query.pnr;
 
   if (!pnr) {
