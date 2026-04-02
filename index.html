@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PNR Status Checker</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body {
+  margin: 0;
+  font-family: 'Segoe UI', sans-serif;
+  background: linear-gradient(135deg, #141e30, #243b55);
+  color: white;
+}
+
+.container {
+  max-width: 420px;
+  margin: 80px auto;
+  padding: 25px;
+  background: rgba(0,0,0,0.4);
+  border-radius: 15px;
+  box-shadow: 0 0 20px rgba(0,0,0,0.5);
+  text-align: center;
+}
+
+h2 {
+  margin-bottom: 20px;
+}
+
+input {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
+  font-size: 16px;
+  margin-bottom: 15px;
+}
+
+button {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  background: #00c6ff;
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #0072ff;
+}
+
+.loader {
+  display: none;
+  margin-top: 15px;
+}
+
+.result {
+  display: none;
+  margin-top: 20px;
+  text-align: left;
+  background: #0f1a24;
+  padding: 15px;
+  border-radius: 10px;
+}
+
+.card {
+  margin-bottom: 10px;
+  padding: 10px;
+  background: #1e2a38;
+  border-radius: 8px;
+}
+
+.fade {
+  animation: fadeIn 0.6s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {opacity: 0;}
+  to {opacity: 1;}
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+  <h2>🚆 Check PNR Status</h2>
+
+  <input type="text" id="pnr" placeholder="Enter 10-digit PNR">
+
+  <button onclick="checkPNR()">Check Status</button>
+
+  <div class="loader" id="loader">🔄 Checking PNR...</div>
+
+  <div class="result fade" id="result"></div>
+</div>
+
+<script>
+function checkPNR() {
+  let pnr = document.getElementById("pnr").value;
+  let loader = document.getElementById("loader");
+  let result = document.getElementById("result");
+
+  if (!pnr || pnr.length < 10) {
+    alert("Enter valid 10-digit PNR");
+    return;
+  }
+
+  loader.style.display = "block";
+  result.style.display = "none";
+
+  fetch("https://pnr-api-0hf4.onrender.com/pnr-status?pnr=" + pnr)
+    .then(res => res.json())
+    .then(data => {
+      loader.style.display = "none";
+      result.style.display = "block";
+
+      // 👇 Data safe extraction
+      let html = `
+        <div class="card"><b>Train:</b> ${data.trainName || "N/A"}</div>
+        <div class="card"><b>Train No:</b> ${data.trainNum || "N/A"}</div>
+        <div class="card"><b>From:</b> ${data.stationFrom || "N/A"}</div>
+        <div class="card"><b>To:</b> ${data.stationTo || "N/A"}</div>
+        <div class="card"><b>Status:</b> ${data.bookingStatus || "Check chart"}</div>
+      `;
+
+      result.innerHTML = html;
+    })
+    .catch(err => {
+      loader.style.display = "none";
+      result.style.display = "block";
+      result.innerHTML = "❌ Failed to fetch data";
+    });
+}
+</script>
+
+</body>
+</html>
