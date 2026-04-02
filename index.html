@@ -8,7 +8,7 @@
 <style>
 body {
   margin: 0;
-  font-family: Arial;
+  font-family: Arial, sans-serif;
   background: linear-gradient(135deg, #141e30, #243b55);
   color: white;
 }
@@ -20,19 +20,29 @@ body {
   background: #1e2a38;
   border-radius: 12px;
   text-align: center;
+  box-shadow: 0 0 15px rgba(0,0,0,0.5);
 }
 
-input, button {
+h2 {
+  margin-bottom: 15px;
+}
+
+input {
   width: 100%;
   padding: 12px;
-  margin-top: 10px;
   border-radius: 8px;
   border: none;
+  margin-bottom: 10px;
 }
 
 button {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
   background: #00c6ff;
   color: white;
+  font-size: 16px;
   cursor: pointer;
 }
 
@@ -65,13 +75,13 @@ button:hover {
 <body>
 
 <div class="container">
-  <h2>🚆 PNR Status</h2>
+  <h2>🚆 PNR Status Checker</h2>
 
   <input type="text" id="pnr" placeholder="Enter 10-digit PNR">
 
   <button onclick="checkPNR()">Check Status</button>
 
-  <div class="loader" id="loader">🔄 Checking...</div>
+  <div id="loader" class="loader">🔄 Checking PNR...</div>
 
   <div id="result" class="result"></div>
 </div>
@@ -93,25 +103,23 @@ function checkPNR() {
   fetch("https://pnr-api-0hf4.onrender.com/pnr-status?pnr=" + pnr)
     .then(res => res.json())
     .then(data => {
-      console.log("API:", data);
+      console.log("REAL DATA:", data);
 
       loader.style.display = "none";
 
-      // 🔥 main data
-      let d = data;
-
       let html = `
-        <div class="card"><b>🚆 Train:</b> ${d.trainName || "N/A"}</div>
-        <div class="card"><b>🔢 Train No:</b> ${d.trainNum || "N/A"}</div>
-        <div class="card"><b>📍 From:</b> ${d.stationFrom || "N/A"}</div>
-        <div class="card"><b>📍 To:</b> ${d.stationTo || "N/A"}</div>
+        <div class="card"><b>🚆 Train:</b> ${data.trainName || "N/A"}</div>
+        <div class="card"><b>🔢 Train No:</b> ${data.trainNum || "N/A"}</div>
+        <div class="card"><b>📍 From:</b> ${data.stationFrom || "N/A"}</div>
+        <div class="card"><b>📍 To:</b> ${data.stationTo || "N/A"}</div>
+        <div class="card"><b>📅 Journey:</b> ${data.departureDate || "N/A"}</div>
       `;
 
-      // 👥 Passenger List
-      if (d.passengerList && d.passengerList.length > 0) {
+      // Passenger Status
+      if (data.passengerList && data.passengerList.length > 0) {
         html += `<h3>👥 Passenger Status</h3>`;
 
-        d.passengerList.forEach(p => {
+        data.passengerList.forEach(p => {
           let status = p.currentStatus || "N/A";
           let color = status.includes("CNF") ? "green" : "red";
 
@@ -121,6 +129,8 @@ function checkPNR() {
             </div>
           `;
         });
+      } else {
+        html += `<div class="card">No passenger data</div>`;
       }
 
       result.innerHTML = html;
