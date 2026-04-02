@@ -8,80 +8,44 @@
 <style>
 body {
   margin: 0;
-  font-family: 'Segoe UI', sans-serif;
-  background: linear-gradient(135deg, #141e30, #243b55);
+  font-family: Arial;
+  background: #0f2027;
   color: white;
 }
 
 .container {
-  max-width: 420px;
+  max-width: 400px;
   margin: 60px auto;
-  padding: 25px;
-  background: rgba(0,0,0,0.4);
-  border-radius: 15px;
-  box-shadow: 0 0 20px rgba(0,0,0,0.5);
+  padding: 20px;
+  background: #1e2a38;
+  border-radius: 10px;
   text-align: center;
 }
 
-h2 {
-  margin-bottom: 20px;
-}
-
-input {
+input, button {
   width: 100%;
   padding: 12px;
+  margin-top: 10px;
   border-radius: 8px;
   border: none;
-  font-size: 16px;
-  margin-bottom: 15px;
 }
 
 button {
-  width: 100%;
-  padding: 12px;
-  border: none;
-  border-radius: 8px;
   background: #00c6ff;
   color: white;
-  font-size: 16px;
   cursor: pointer;
 }
 
-button:hover {
-  background: #0072ff;
-}
-
-.loader {
-  display: none;
-  margin-top: 15px;
-}
-
 .result {
-  display: none;
   margin-top: 20px;
   text-align: left;
-  background: #0f1a24;
-  padding: 15px;
-  border-radius: 10px;
 }
 
 .card {
-  margin-bottom: 10px;
+  background: #0f1a24;
   padding: 10px;
-  background: #1e2a38;
-  border-radius: 8px;
-}
-
-.status-green { color: #00ff99; }
-.status-red { color: #ff4d4d; }
-
-.fade {
-  animation: fadeIn 0.6s ease-in-out;
-}
-
-@keyframes fadeIn {
-  from {opacity: 0;}
-  to {opacity: 1;}
+  margin-bottom: 10px;
+  border-radius: 6px;
 }
 </style>
 </head>
@@ -89,63 +53,61 @@ button:hover {
 <body>
 
 <div class="container">
-  <h2>🚆 Check PNR Status</h2>
+  <h2>🚆 PNR Status</h2>
 
-  <input type="text" id="pnr" placeholder="Enter 10-digit PNR">
+  <input type="text" id="pnr" placeholder="Enter PNR">
 
-  <button onclick="checkPNR()">Check Status</button>
+  <button onclick="checkPNR()">Check</button>
 
-  <div class="loader" id="loader">🔄 Checking PNR...</div>
+  <div id="loader" style="display:none;">Checking...</div>
 
-  <div class="result fade" id="result"></div>
+  <div id="result" class="result"></div>
 </div>
 
 <script>
 function checkPNR() {
-  let pnr = document.getElementById("pnr").value.trim();
+  let pnr = document.getElementById("pnr").value;
   let loader = document.getElementById("loader");
   let result = document.getElementById("result");
 
-  if (!pnr || pnr.length < 10) {
-    alert("Enter valid 10-digit PNR");
-    return;
-  }
-
   loader.style.display = "block";
-  result.style.display = "none";
+  result.innerHTML = "";
 
   fetch("https://pnr-api-0hf4.onrender.com/pnr-status?pnr=" + pnr)
     .then(res => res.json())
     .then(data => {
-      console.log("API DATA:", data);
+
+      console.log("FULL DATA:", data); // 🔥 DEBUG
 
       loader.style.display = "none";
-      result.style.display = "block";
 
-      // ✅ handle both formats
+      // 👉 Handle all formats
       let d = data.data || data;
 
-      if (!d || (!d.trainName && !d.trainNum)) {
-        result.innerHTML = "❌ Invalid PNR or no data";
+      // 👉 अगर data ही नहीं है
+      if (!d || typeof d !== "object") {
+        result.innerHTML = "❌ No data found";
         return;
       }
 
+      // 👉 safe values
+      let train = d.trainName || "N/A";
+      let num = d.trainNum || "N/A";
+      let from = d.stationFrom || "N/A";
+      let to = d.stationTo || "N/A";
+
       let html = `
-        <div class="card"><b>🚆 Train:</b> ${d.trainName || "N/A"}</div>
-        <div class="card"><b>🔢 Train No:</b> ${d.trainNum || "N/A"}</div>
-        <div class="card"><b>📍 From:</b> ${d.stationFrom || "N/A"}</div>
-        <div class="card"><b>📍 To:</b> ${d.stationTo || "N/A"}</div>
+        <div class="card">Train: ${train}</div>
+        <div class="card">Number: ${num}</div>
+        <div class="card">From: ${from}</div>
+        <div class="card">To: ${to}</div>
       `;
 
-      // ✅ Passenger List
-      if (d.passengerList && d.passengerList.length > 0) {
-        html += `<h3>👥 Passenger Status</h3>`;
-
+      // 👉 Passenger list safe
+      if (d.passengerList && Array.isArray(d.passengerList)) {
         d.passengerList.forEach(p => {
-          let statusClass = p.currentStatus.includes("CNF") ? "status-green" : "status-red";
-
           html += `
-            <div class="card ${statusClass}">
+            <div class="card">
               Passenger ${p.passengerSerialNumber}: ${p.currentStatus}
             </div>
           `;
@@ -156,8 +118,7 @@ function checkPNR() {
     })
     .catch(err => {
       loader.style.display = "none";
-      result.style.display = "block";
-      result.innerHTML = "❌ Error fetching data";
+      result.innerHTML = "❌ Error loading data";
     });
 }
 </script>
