@@ -10,14 +10,22 @@
        - "Mark Delivered" now also stamps delivered_at, and the card
          shows "Delivered, 3 Aug, 6:42 PM" next to the status badge
          on laptop, and on its own line on phone.
-       - NEW: "Cancel Order" button next to "Mark Shipped" (when
+       - "Cancel Order" button next to "Mark Shipped" (when
          status = placed) and next to "Mark Delivered" (when status
          = shipped). Clicking it shows a Yes/No confirm popup; only
          confirming actually cancels the order.
+       - NEW: tracks who cancelled the order (cancelled_by: 'admin' or
+         'customer'). Cancelled cards now show "Cancelled by you" /
+         "Cancelled by Customer" next to the badge, and the actions
+         row shows "Order cancelled. (by you)" / "(by Customer)".
+       - NEW: real-time clock (with seconds) in the header after login.
+       - NEW: real loader (spinner) + toast messages for Mark Shipped/
+         Delivered, Confirm/Reject Cancellation, and Admin Cancel.
 
      Requires (run once in Supabase SQL editor, if not already done):
        alter table orders add column if not exists user_email text;
        alter table orders add column if not exists delivered_at timestamptz;
+       alter table orders add column if not exists cancelled_by text;
      ============================================================ -->
 
 <!-- ===== CRITICAL FIX: clears a leftover overlay flag from the main
@@ -98,6 +106,7 @@
     <header class="adheader">
       <h1>Orders — Admin</h1>
       <div class="adheaderright">
+        <span id="adLiveClock" class="adliveclock"></span>
         <span id="adAdminEmail"></span>
         <button class="adlogoutbtn" onclick="adDoLogout()" type="button">Logout</button>
       </div>
@@ -140,6 +149,7 @@
   .adheader{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px;}
   .adheader h1{font-size:22px;margin:0;color:#1e2430;}
   .adheaderright{display:flex;align-items:center;gap:12px;font-size:13px;color:#767e8c;}
+  .adliveclock{font-weight:700;color:#1e2430;font-variant-numeric:tabular-nums;background:#eef3ff;padding:5px 10px;border-radius:8px;font-size:12.5px;}
   .adlogoutbtn{background:#fff;border:1.5px solid #e0e0e0;padding:8px 16px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;color:#1e2430;}
   .adlogoutbtn:hover{background:#fdecea;border-color:#e11d48;color:#e11d48;}
 
@@ -164,6 +174,7 @@
      wraps to its own line on mobile — see media query below. */
   .adbadgewrap{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
   .addeliveredtag{font-size:11.5px;color:#0f766e;font-weight:700;}
+  .adcancelledtag{font-size:11.5px;color:#e11d48;font-weight:700;}
 
   .aditemsrow{display:flex;gap:10px;overflow-x:auto;padding:6px 0;margin-bottom:10px;}
   .aditemthumb{width:52px;height:52px;border-radius:8px;object-fit:cover;background:#f2f2f2;flex-shrink:0;}
@@ -240,6 +251,7 @@
      its own line below the status badge instead of sitting beside it. */
   @media(max-width:768px){
     .addeliveredtag{width:100%;}
+    .adcancelledtag{width:100%;}
   }
 
   /* ===== NEW: neutralise the site-wide fixed header / cat-bar /
@@ -367,10 +379,29 @@
     }
   }
 
+  // NEW: live real-time clock in the header, updates every second
+  var adClockTimer = null;
+  function adStartClock(){
+    function tick(){
+      var el = document.getElementById('adLiveClock');
+      if(!el) return;
+      var now = new Date();
+      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      var h = now.getHours(), m = String(now.getMinutes()).padStart(2,'0'), s = String(now.getSeconds()).padStart(2,'0');
+      var ampm = h >= 12 ? 'PM' : 'AM';
+      var h12 = h % 12; if(h12 === 0) h12 = 12;
+      el.textContent = months[now.getMonth()] + ' ' + now.getDate() + ', ' + h12 + ':' + m + ':' + s + ' ' + ampm;
+    }
+    tick();
+    clearInterval(adClockTimer);
+    adClockTimer = setInterval(tick, 1000);
+  }
+
   function showDashboard(user){
     document.getElementById('adLoginScreen').style.display = 'none';
     document.getElementById('adDashboard').style.display = 'block';
     document.getElementById('adAdminEmail').textContent = user.email;
+    adStartClock();
     adLoadOrders();
   }
 
@@ -482,6 +513,14 @@
         deliveredTag = '<span class="addeliveredtag">Delivered, ' + fmtDateShortTime(dDate) + '</span>';
       }
 
+      // NEW: "Cancelled by you" / "Cancelled by Customer" tag next to the CANCELLED badge
+      var cancelledTag = '';
+      if(order.status === 'cancelled'){
+        cancelledTag = order.cancelled_by === 'admin'
+          ? '<span class="adcancelledtag">Cancelled by you</span>'
+          : '<span class="adcancelledtag">Cancelled by Customer</span>';
+      }
+
       var actionsHtml = '';
       if(order.status === 'cancel_requested'){
         actionsHtml =
@@ -494,7 +533,8 @@
         actionsHtml = '<button class="adactionbtn deliver" onclick="adMarkStatus(\'' + order.id + '\',\'delivered\')">Mark Delivered</button>'
           + '<button class="adactionbtn cancel" onclick="adAdminCancelOrder(\'' + order.id + '\')">Cancel Order</button>';
       } else if(order.status === 'cancelled'){
-        actionsHtml = '<span style="font-size:12.5px;color:#767e8c;">No actions available — order cancelled.</span>';
+        var byText = order.cancelled_by === 'admin' ? '(by you)' : '(by Customer)';
+        actionsHtml = '<span style="font-size:12.5px;color:#767e8c;">Order cancelled. ' + byText + '</span>';
       } else if(order.status === 'delivered'){
         actionsHtml = '<span style="font-size:12.5px;color:#767e8c;">Order delivered.</span>';
       }
@@ -502,7 +542,7 @@
       html += '<div class="adordercard">'
         + '<div class="adordertop">'
         + '<div><div class="adorderid">#' + order.id + '</div><div class="adorderdate">' + fmtDateTime(order.created_at) + '</div></div>'
-        + '<div class="adbadgewrap"><span class="adbadge ' + order.status + '">' + order.status.replace('_',' ') + '</span>' + deliveredTag + '</div>'
+        + '<div class="adbadgewrap"><span class="adbadge ' + order.status + '">' + order.status.replace('_',' ') + '</span>' + deliveredTag + cancelledTag + '</div>'
         + '</div>'
         + '<div class="aditemsrow">' + thumbs + '</div>'
         + '<div class="adcustomer"><b>' + escapeHtml(addr.name) + '</b> · ' + escapeHtml(addr.phone) + '</div>'
@@ -523,42 +563,57 @@
   // ===== ACTIONS =====
   window.adConfirmCancel = async function(orderId){
     if(!confirm('Confirm cancellation for this order? This cannot be undone.')) return;
+    adShowLoader();
     var res = await sb.from('orders')
-      .update({ status: 'cancelled' })
+      .update({ status: 'cancelled', cancelled_by: 'customer' })
       .eq('id', orderId)
       .eq('status', 'cancel_requested')
       .select();
     if(!res.data || !res.data.length){
-      alert('Could not update — order state may have changed. Refreshing.');
+      adHideLoader();
+      adShowToast('Could not update — order state may have changed.', true);
+      return;
     }
-    adLoadOrders();
+    await adLoadOrders();
+    adHideLoader();
+    adShowToast('Order Cancelled (by Customer)', false);
   };
 
   window.adRejectCancel = async function(orderId){
     if(!confirm('Reject this cancellation request and keep the order as placed?')) return;
+    adShowLoader();
     var res = await sb.from('orders')
       .update({ status: 'placed' })
       .eq('id', orderId)
       .eq('status', 'cancel_requested')
       .select();
     if(!res.data || !res.data.length){
-      alert('Could not update — order state may have changed. Refreshing.');
+      adHideLoader();
+      adShowToast('Could not update — order state may have changed.', true);
+      return;
     }
-    adLoadOrders();
+    await adLoadOrders();
+    adHideLoader();
+    adShowToast('Cancellation Rejected', false);
   };
 
-  // NEW: direct admin cancel — available while order is "placed" or "shipped".
+  // Direct admin cancel — available while order is "placed" or "shipped".
   // Shows a Yes/No confirm popup first; only proceeds if the admin confirms.
   window.adAdminCancelOrder = async function(orderId){
     if(!confirm('Kya aap sach me is order ko cancel karna chahte hain? Yeh undo nahi ho sakta.')) return;
+    adShowLoader();
     var res = await sb.from('orders')
-      .update({ status: 'cancelled' })
+      .update({ status: 'cancelled', cancelled_by: 'admin' })
       .eq('id', orderId)
       .select();
     if(!res.data || !res.data.length){
-      alert('Order cancel nahi ho paaya.');
+      adHideLoader();
+      adShowToast('Order cancel nahi ho paaya.', true);
+      return;
     }
-    adLoadOrders();
+    await adLoadOrders();
+    adHideLoader();
+    adShowToast('Order Cancelled (by you)', false);
   };
 
   window.adMarkStatus = async function(orderId, newStatus){
