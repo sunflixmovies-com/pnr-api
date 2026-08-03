@@ -4,40 +4,16 @@
      (final URL: /p/admin.html) — don't link this anywhere public.
 
      UPDATED (this version):
-       - NEW STATUS: "out_for_delivery" added between "shipped" and
-         "delivered". Full flow is now:
-           placed -> shipped -> out_for_delivery -> delivered
-         (cancel_requested / cancelled can still branch off placed/shipped)
-       - New filter tab: "Out for Delivery".
-       - New badge color for out_for_delivery.
-       - On a "shipped" order the button is now "Mark Out for Delivery"
-         (instead of "Mark Delivered"), plus Cancel Order.
-       - On an "out_for_delivery" order the only action is "Mark
-         Delivered" (no cancel button here — order is already with the
-         delivery agent, matches how the "shipped" stage used to work
-         before "out for delivery" existed).
-       - NEW: "Mark Shipped" now stamps shipped_at and "Mark Out for
-         Delivery" now stamps out_for_delivery_at (delivered_at was
-         already being stamped). Each order card now shows the real
-         date+time next to the badge for whichever of these three
-         is the CURRENT status — e.g. "SHIPPED  Shipped, 4 Aug, 12:07 AM"
-         — same idea as the existing "Delivered, ..." tag.
-       - This same real timestamp is what the customer-facing orders
-         page now reads to show real dates on its stepper instead of
-         guessed ones.
-       - NEW: the "Shipped, ..." / "Out for Delivery, ..." / "Delivered,
-         ..." date+time now shows on its OWN line right below the status
-         badge (not beside it anymore, on any screen size).
-       - NEW: each card now clearly labels "Order ID: #XXXXXXXX" (short
-         id, matches what customers see) with the full id shown faintly
-         next to it in brackets for when you need to search/copy it.
-       - NEW: "Cancelled by you" / "Cancelled by Customer" now also shows
-         the real date+time it happened (stamped in cancelled_at),
-         same as Shipped/Out for Delivery/Delivered.
+       - NEW: Order ID now shows the real, human-readable order_number
+         column (e.g. "ORD-TRI4648AA") if it exists on the row, instead
+         of a random fragment of the UUID. Falls back to the old
+         UUID-fragment style automatically for any older order that
+         doesn't have an order_number yet, so nothing breaks.
 
-     (all earlier features unchanged: customer email shown, admin cancel
-     with Yes/No confirm + cancelled_by tracking, real-time clock, loader
-     + toasts)
+     (all earlier features unchanged: out_for_delivery status/flow,
+     real shipped/out_for_delivery/delivered timestamps shown per card,
+     customer email shown, admin cancel with Yes/No confirm + cancelled_by
+     tracking, real-time clock, loader + toasts)
 
      Requires (run once in Supabase SQL editor, if not already done):
        alter table orders add column if not exists user_email text;
@@ -46,6 +22,12 @@
        alter table orders add column if not exists out_for_delivery_at timestamptz;
        alter table orders add column if not exists delivered_at timestamptz;
        alter table orders add column if not exists cancelled_at timestamptz;
+
+       -- for the human-readable Order ID (ORD-TRI4648AA style):
+       alter table orders add column if not exists order_number text unique;
+
+       create sequence if not exists order_seq start 1001; -- (not required
+       -- if you're using the random ORD-TRI generator function instead)
 
      NOTE: if your "orders.status" column has a CHECK constraint that
      restricts which text values are allowed, you must also add
@@ -344,6 +326,12 @@
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
     });
   }
+  // Human-readable Order ID: uses order.order_number if present
+  // (e.g. "ORD-TRI4648AA"), else falls back to the old UUID-fragment
+  // style for any legacy order created before order_number existed.
+  function displayOrderId(order){
+    return order.order_number || (order.id || '').split('-')[0].toUpperCase();
+  }
 
   // loader overlay controls
   function adShowLoader(){
@@ -591,7 +579,7 @@
 
       html += '<div class="adordercard">'
         + '<div class="adordertop">'
-        + '<div><div class="adorderid">Order ID: #' + (order.id||'').split('-')[0].toUpperCase() + '<span class="adorderidfull"> (' + order.id + ')</span></div><div class="adorderdate">' + fmtDateTime(order.created_at) + '</div></div>'
+        + '<div><div class="adorderid">Order ID: #' + displayOrderId(order) + '<span class="adorderidfull"> (' + order.id + ')</span></div><div class="adorderdate">' + fmtDateTime(order.created_at) + '</div></div>'
         + '<div class="adbadgewrap"><span class="adbadge ' + order.status + '">' + order.status.replace('_',' ') + '</span>' + shippedTag + outForDeliveryTag + deliveredTag + cancelledTag + '</div>'
         + '</div>'
         + (order.cancel_reason ? '<div class="adreasonline">Reason: <b>' + escapeHtml(order.cancel_reason) + '</b></div>' : '')
