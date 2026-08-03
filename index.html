@@ -67,6 +67,14 @@
 
 <div class="adwrap">
 
+  <!-- NEW: full-screen loader shown during any admin action (mark shipped/delivered, refresh, etc.) -->
+  <div class="adloaderoverlay" id="adLoaderOverlay">
+    <div class="adspinner"></div>
+  </div>
+
+  <!-- NEW: toast notification (e.g. "Customer Order Shipped") -->
+  <div class="adtoast" id="adToast"></div>
+
   <!-- LOGIN SCREEN -->
   <div class="adlogin" id="adLoginScreen">
     <div class="adloginbox">
@@ -184,6 +192,44 @@
 
   .adempty{text-align:center;padding:60px 20px;color:#767e8c;font-size:14px;}
 
+  /* NEW: full-screen loader overlay */
+  .adloaderoverlay{
+    display:none;
+    position:fixed;top:0;left:0;right:0;bottom:0;
+    background:rgba(255,255,255,.6);
+    z-index:999999;
+    align-items:center;justify-content:center;
+  }
+  .adloaderoverlay.show{ display:flex; }
+  .adspinner{
+    width:44px;height:44px;
+    border:4px solid #d9e2e1;
+    border-top-color:#0f766e;
+    border-radius:50%;
+    animation:adspin .7s linear infinite;
+  }
+  @keyframes adspin{ to{ transform:rotate(360deg); } }
+
+  /* NEW: toast notification */
+  .adtoast{
+    position:fixed;
+    top:-80px;
+    left:50%;
+    transform:translateX(-50%);
+    background:#1e2430;
+    color:#fff;
+    padding:12px 22px;
+    border-radius:10px;
+    font-size:13.5px;
+    font-weight:700;
+    box-shadow:0 8px 24px rgba(0,0,0,.18);
+    z-index:9999999;
+    transition:top .35s ease;
+    white-space:nowrap;
+  }
+  .adtoast.show{ top:18px; }
+  .adtoast.error{ background:#e11d48; }
+
   /* Light desktop polish — cards a bit wider / grid on large screens */
   @media(min-width:1000px){
     .addash{padding:24px 32px;}
@@ -255,6 +301,29 @@
     return (str || '').toString().replace(/[&<>"']/g, function(c){
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
     });
+  }
+
+  // NEW: loader overlay controls
+  function adShowLoader(){
+    var ov = document.getElementById('adLoaderOverlay');
+    if(ov) ov.classList.add('show');
+  }
+  function adHideLoader(){
+    var ov = document.getElementById('adLoaderOverlay');
+    if(ov) ov.classList.remove('show');
+  }
+
+  // NEW: toast notification controls
+  var adToastTimer = null;
+  function adShowToast(msg, isError){
+    var t = document.getElementById('adToast');
+    if(!t) return;
+    t.textContent = msg;
+    t.className = 'adtoast show' + (isError ? ' error' : '');
+    clearTimeout(adToastTimer);
+    adToastTimer = setTimeout(function(){
+      t.className = 'adtoast';
+    }, 2600);
   }
 
   function initAdmin(){
@@ -360,11 +429,12 @@
   // ===== LOAD ORDERS =====
   window.adLoadOrders = async function(){
     var list = document.getElementById('adOrdersList');
-    list.innerHTML = '<div class="adempty">Loading...</div>';
+    adShowLoader();
     try{
       var res = await sb.from('orders').select('*').order('created_at', { ascending: false });
       if(res.error){
         list.innerHTML = '<div class="adempty">Error loading orders: ' + escapeHtml(res.error.message) + '</div>';
+        adHideLoader();
         return;
       }
       allOrders = res.data || [];
@@ -372,6 +442,7 @@
     } catch(err){
       list.innerHTML = '<div class="adempty">Error loading orders: ' + escapeHtml(err.message) + '</div>';
     }
+    adHideLoader();
   };
 
   window.adSetFilter = function(filter, btnEl){
@@ -491,20 +562,30 @@
   };
 
   window.adMarkStatus = async function(orderId, newStatus){
+    adShowLoader();
     // when marking delivered, stamp delivered_at so the customer
     // page and this admin page can both show "Delivered, 3 Aug, 6:42 PM".
     var updateObj = { status: newStatus };
     if(newStatus === 'delivered'){
       updateObj.delivered_at = new Date().toISOString();
     }
-    var res = await sb.from('orders')
-      .update(updateObj)
-      .eq('id', orderId)
-      .select();
-    if(!res.data || !res.data.length){
-      alert('Could not update order.');
+    var res;
+    try{
+      res = await sb.from('orders').update(updateObj).eq('id', orderId).select();
+    } catch(err){
+      adHideLoader();
+      adShowToast('Error: ' + err.message, true);
+      return;
     }
-    adLoadOrders();
+    if(!res.data || !res.data.length){
+      adHideLoader();
+      adShowToast('Could not update order.', true);
+      return;
+    }
+    await adLoadOrders();
+    adHideLoader();
+    var label = newStatus === 'shipped' ? 'Customer Order Shipped' : (newStatus === 'delivered' ? 'Customer Order Delivered' : 'Order Updated');
+    adShowToast(label, false);
   };
 
   window.adSaveDeliveryDate = async function(orderId){
