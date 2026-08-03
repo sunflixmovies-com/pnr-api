@@ -8,7 +8,12 @@
          — only populated for orders placed via the updated checkout
          page; older orders will show "—".
        - "Mark Delivered" now also stamps delivered_at, and the card
-         shows "Delivered, 7 Aug" next to the status badge.
+         shows "Delivered, 3 Aug, 6:42 PM" next to the status badge
+         on laptop, and on its own line on phone.
+       - NEW: "Cancel Order" button next to "Mark Shipped" (when
+         status = placed) and next to "Mark Delivered" (when status
+         = shipped). Clicking it shows a Yes/No confirm popup; only
+         confirming actually cancels the order.
 
      Requires (run once in Supabase SQL editor, if not already done):
        alter table orders add column if not exists user_email text;
@@ -147,7 +152,8 @@
   .adbadge.shipped{background:#eef3ff;color:#2874f0;}
   .adbadge.delivered{background:#eef7ff;color:#0f766e;}
 
-  /* NEW: "Delivered, 7 Aug" tag next to the badge */
+  /* "Delivered, 3 Aug, 6:42 PM" tag next to the badge (desktop);
+     wraps to its own line on mobile — see media query below. */
   .adbadgewrap{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
   .addeliveredtag{font-size:11.5px;color:#0f766e;font-weight:700;}
 
@@ -156,7 +162,6 @@
 
   .adcustomer{font-size:13px;color:#333;margin-bottom:4px;}
   .adcustomer b{color:#1e2430;}
-  /* NEW: email line */
   .ademail{font-size:12.5px;color:#767e8c;margin-bottom:8px;}
   .ademail b{color:#1e2430;font-weight:600;}
   .adaddr{font-size:12.5px;color:#767e8c;margin-bottom:12px;line-height:1.5;}
@@ -172,6 +177,7 @@
   .adactionbtn.reject{background:#f1f3f6;color:#333;}
   .adactionbtn.ship{background:#2874f0;color:#fff;}
   .adactionbtn.deliver{background:#0f766e;color:#fff;}
+  /* NEW: Cancel Order button (shown next to Mark Shipped / Mark Delivered) */
   .adactionbtn.cancel{background:#e11d48;color:#fff;}
   .adactionbtn:disabled{opacity:.5;cursor:default;}
 
@@ -181,6 +187,12 @@
   @media(min-width:1000px){
     .addash{padding:24px 32px;}
     .adorderslist{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  }
+
+  /* NEW: on phone-sized screens, force the "Delivered, ..." tag onto
+     its own line below the status badge instead of sitting beside it. */
+  @media(max-width:768px){
+    .addeliveredtag{width:100%;}
   }
 
   /* ===== NEW: neutralise the site-wide fixed header / cat-bar /
@@ -202,9 +214,6 @@
     padding-bottom:0 !important;
     visibility:visible !important;
   }
-  @media(max-width:768px){
-  .addeliveredtag{width:100%;}
-}
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -223,20 +232,20 @@
     var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return months[dt.getMonth()] + ' ' + dt.getDate() + ', ' + dt.getFullYear() + ' ' + dt.getHours() + ':' + String(dt.getMinutes()).padStart(2,'0');
   }
-  // NEW: short date like "7 Aug" used for the "Delivered, 7 Aug" tag
   function fmtDateShort(d){
     var dt = new Date(d);
     var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return dt.getDate() + ' ' + months[dt.getMonth()];
   }
+  // NEW: date + time like "3 Aug, 6:42 PM" used for the "Delivered, ..." tag
   function fmtDateShortTime(d){
-  var dt = new Date(d);
-  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var h = dt.getHours(), m = String(dt.getMinutes()).padStart(2,'0');
-  var ampm = h>=12?'PM':'AM';
-  var h12 = h%12; if(h12===0) h12=12;
-  return dt.getDate()+' '+months[dt.getMonth()]+', '+h12+':'+m+' '+ampm;
-}
+    var dt = new Date(d);
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var h = dt.getHours(), m = String(dt.getMinutes()).padStart(2,'0');
+    var ampm = h>=12?'PM':'AM';
+    var h12 = h%12; if(h12===0) h12=12;
+    return dt.getDate()+' '+months[dt.getMonth()]+', '+h12+':'+m+' '+ampm;
+  }
   function toDateInputValue(d){
     var dt = new Date(d);
     return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
@@ -389,7 +398,8 @@
       }).join('');
       var deliveryVal = toDateInputValue(order.delivery_date || new Date(new Date(order.created_at).getTime() + 5*24*60*60*1000));
 
-      // NEW: "Delivered, 7 Aug" tag shown next to the status badge
+      // "Delivered, 3 Aug, 6:42 PM" tag shown next to the status badge
+      // (wraps to its own line on phone via the media query in <style>)
       var deliveredTag = '';
       if(order.status === 'delivered'){
         var dDate = order.delivered_at || order.updated_at || order.created_at;
@@ -401,13 +411,12 @@
         actionsHtml =
           '<button class="adactionbtn confirm" onclick="adConfirmCancel(\'' + order.id + '\')">Confirm Cancellation</button>'
           + '<button class="adactionbtn reject" onclick="adRejectCancel(\'' + order.id + '\')">Reject (Keep Order)</button>';
- } else if(order.status === 'placed'){
-  actionsHtml = '<button class="adactionbtn ship" onclick="adMarkStatus(\'' + order.id + '\',\'shipped\')">Mark Shipped</button>'
-    + '<button class="adactionbtn cancel" onclick="adAdminCancelOrder(\'' + order.id + '\')">Cancel Order</button>';
-} else if(order.status === 'shipped'){
-  actionsHtml = '<button class="adactionbtn deliver" onclick="adMarkStatus(\'' + order.id + '\',\'delivered\')">Mark Delivered</button>'
-    + '<button class="adactionbtn cancel" onclick="adAdminCancelOrder(\'' + order.id + '\')">Cancel Order</button>';
-}
+      } else if(order.status === 'placed'){
+        actionsHtml = '<button class="adactionbtn ship" onclick="adMarkStatus(\'' + order.id + '\',\'shipped\')">Mark Shipped</button>'
+          + '<button class="adactionbtn cancel" onclick="adAdminCancelOrder(\'' + order.id + '\')">Cancel Order</button>';
+      } else if(order.status === 'shipped'){
+        actionsHtml = '<button class="adactionbtn deliver" onclick="adMarkStatus(\'' + order.id + '\',\'delivered\')">Mark Delivered</button>'
+          + '<button class="adactionbtn cancel" onclick="adAdminCancelOrder(\'' + order.id + '\')">Cancel Order</button>';
       } else if(order.status === 'cancelled'){
         actionsHtml = '<span style="font-size:12.5px;color:#767e8c;">No actions available — order cancelled.</span>';
       } else if(order.status === 'delivered'){
@@ -462,24 +471,27 @@
     adLoadOrders();
   };
 
+  // NEW: direct admin cancel — available while order is "placed" or "shipped".
+  // Shows a Yes/No confirm popup first; only proceeds if the admin confirms.
+  window.adAdminCancelOrder = async function(orderId){
+    if(!confirm('Kya aap sach me is order ko cancel karna chahte hain? Yeh undo nahi ho sakta.')) return;
+    var res = await sb.from('orders')
+      .update({ status: 'cancelled' })
+      .eq('id', orderId)
+      .select();
+    if(!res.data || !res.data.length){
+      alert('Order cancel nahi ho paaya.');
+    }
+    adLoadOrders();
+  };
+
   window.adMarkStatus = async function(orderId, newStatus){
-    // NEW: when marking delivered, stamp delivered_at so the customer
-    // page and this admin page can both show "Delivered, 7 Aug".
+    // when marking delivered, stamp delivered_at so the customer
+    // page and this admin page can both show "Delivered, 3 Aug, 6:42 PM".
     var updateObj = { status: newStatus };
     if(newStatus === 'delivered'){
       updateObj.delivered_at = new Date().toISOString();
     }
-    window.adAdminCancelOrder = async function(orderId){
-  if(!confirm('Kya aap sach me is order ko cancel karna chahte hain? Yeh undo nahi ho sakta.')) return;
-  var res = await sb.from('orders')
-    .update({ status: 'cancelled' })
-    .eq('id', orderId)
-    .select();
-  if(!res.data || !res.data.length){
-    alert('Order cancel nahi ho paaya.');
-  }
-  adLoadOrders();
-};
     var res = await sb.from('orders')
       .update(updateObj)
       .eq('id', orderId)
@@ -507,5 +519,5 @@
   };
 
 })();
- 
+
 </script>
