@@ -3,29 +3,38 @@
      of a new Blogger Page. Set the page's custom URL to: admin
      (final URL: /p/admin.html) — don't link this anywhere public.
 
-     UPDATED:
-       - Shows the customer's email (order.user_email) on each card
-         — only populated for orders placed via the updated checkout
-         page; older orders will show "—".
-       - "Mark Delivered" now also stamps delivered_at, and the card
-         shows "Delivered, 3 Aug, 6:42 PM" next to the status badge
-         on laptop, and on its own line on phone.
-       - "Cancel Order" button next to "Mark Shipped" (when
-         status = placed) and next to "Mark Delivered" (when status
-         = shipped). Clicking it shows a Yes/No confirm popup; only
-         confirming actually cancels the order.
-       - NEW: tracks who cancelled the order (cancelled_by: 'admin' or
-         'customer'). Cancelled cards now show "Cancelled by you" /
-         "Cancelled by Customer" next to the badge, and the actions
-         row shows "Order cancelled. (by you)" / "(by Customer)".
-       - NEW: real-time clock (with seconds) in the header after login.
-       - NEW: real loader (spinner) + toast messages for Mark Shipped/
-         Delivered, Confirm/Reject Cancellation, and Admin Cancel.
+     UPDATED (this version):
+       - NEW STATUS: "out_for_delivery" added between "shipped" and
+         "delivered". Full flow is now:
+           placed -> shipped -> out_for_delivery -> delivered
+         (cancel_requested / cancelled can still branch off placed/shipped)
+       - New filter tab: "Out for Delivery".
+       - New badge color for out_for_delivery.
+       - On a "shipped" order the button is now "Mark Out for Delivery"
+         (instead of "Mark Delivered"), plus Cancel Order.
+       - On an "out_for_delivery" order the only action is "Mark
+         Delivered" (no cancel button here — order is already with the
+         delivery agent, matches how the "shipped" stage used to work
+         before "out for delivery" existed).
+
+     (all earlier features unchanged: customer email shown, delivered_at
+     stamp + "Delivered, 3 Aug, 6:42 PM" tag, admin cancel with Yes/No
+     confirm + cancelled_by tracking, real-time clock, loader + toasts)
 
      Requires (run once in Supabase SQL editor, if not already done):
        alter table orders add column if not exists user_email text;
        alter table orders add column if not exists delivered_at timestamptz;
        alter table orders add column if not exists cancelled_by text;
+
+     NOTE: if your "orders.status" column has a CHECK constraint that
+     restricts which text values are allowed, you must also add
+     'out_for_delivery' to that constraint's allowed list, e.g.:
+       alter table orders drop constraint if exists orders_status_check;
+       alter table orders add constraint orders_status_check
+         check (status in ('placed','cancel_requested','cancelled',
+                            'shipped','out_for_delivery','delivered'));
+     (If status is a plain text column with no constraint, you can
+     skip this — nothing extra needed.)
      ============================================================ -->
 
 <!-- ===== CRITICAL FIX: clears a leftover overlay flag from the main
@@ -75,12 +84,12 @@
 
 <div class="adwrap">
 
-  <!-- NEW: full-screen loader shown during any admin action (mark shipped/delivered, refresh, etc.) -->
+  <!-- full-screen loader shown during any admin action (mark shipped/delivered, refresh, etc.) -->
   <div class="adloaderoverlay" id="adLoaderOverlay">
     <div class="adspinner"></div>
   </div>
 
-  <!-- NEW: toast notification (e.g. "Customer Order Shipped") -->
+  <!-- toast notification (e.g. "Customer Order Shipped") -->
   <div class="adtoast" id="adToast"></div>
 
   <!-- LOGIN SCREEN -->
@@ -117,6 +126,7 @@
       <button class="adfilterbtn" data-filter="placed" onclick="adSetFilter('placed',this)">Placed</button>
       <button class="adfilterbtn" data-filter="cancel_requested" onclick="adSetFilter('cancel_requested',this)">Cancel Requests</button>
       <button class="adfilterbtn" data-filter="shipped" onclick="adSetFilter('shipped',this)">Shipped</button>
+      <button class="adfilterbtn" data-filter="out_for_delivery" onclick="adSetFilter('out_for_delivery',this)">Out for Delivery</button>
       <button class="adfilterbtn" data-filter="delivered" onclick="adSetFilter('delivered',this)">Delivered</button>
       <button class="adfilterbtn" data-filter="cancelled" onclick="adSetFilter('cancelled',this)">Cancelled</button>
       <button class="adrefreshbtn" onclick="adLoadOrders()" type="button">⟳ Refresh</button>
@@ -168,6 +178,7 @@
   .adbadge.cancel_requested{background:#fff7ed;color:#b45309;}
   .adbadge.cancelled{background:#fdecea;color:#e11d48;}
   .adbadge.shipped{background:#eef3ff;color:#2874f0;}
+  .adbadge.out_for_delivery{background:#fdf4ff;color:#9333ea;}
   .adbadge.delivered{background:#eef7ff;color:#0f766e;}
 
   /* "Delivered, 3 Aug, 6:42 PM" tag next to the badge (desktop);
@@ -199,13 +210,13 @@
   .adactionbtn.reject{background:#f1f3f6;color:#333;}
   .adactionbtn.ship{background:#2874f0;color:#fff;}
   .adactionbtn.deliver{background:#0f766e;color:#fff;}
-  /* NEW: Cancel Order button (shown next to Mark Shipped / Mark Delivered) */
+  /* Cancel Order button (shown next to Mark Shipped / Mark Out for Delivery) */
   .adactionbtn.cancel{background:#e11d48;color:#fff;}
   .adactionbtn:disabled{opacity:.5;cursor:default;}
 
   .adempty{text-align:center;padding:60px 20px;color:#767e8c;font-size:14px;}
 
-  /* NEW: full-screen loader overlay */
+  /* full-screen loader overlay */
   .adloaderoverlay{
     display:none;
     position:fixed;top:0;left:0;right:0;bottom:0;
@@ -223,7 +234,7 @@
   }
   @keyframes adspin{ to{ transform:rotate(360deg); } }
 
-  /* NEW: toast notification */
+  /* toast notification */
   .adtoast{
     position:fixed;
     top:-80px;
@@ -249,14 +260,14 @@
     .adorderslist{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
   }
 
-  /* NEW: on phone-sized screens, force the "Delivered, ..." tag onto
+  /* on phone-sized screens, force the "Delivered, ..." tag onto
      its own line below the status badge instead of sitting beside it. */
   @media(max-width:768px){
     .addeliveredtag{width:100%;}
     .adcancelledtag{width:100%;}
   }
 
-  /* ===== NEW: neutralise the site-wide fixed header / cat-bar /
+  /* ===== neutralise the site-wide fixed header / cat-bar /
      bottom-nav / page-loader on THIS page, on EVERY screen size.
      The theme only hides these on mobile — on laptop they were
      staying fixed on top (z-index 99999) and covering the page. ===== */
@@ -298,7 +309,7 @@
     var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return dt.getDate() + ' ' + months[dt.getMonth()];
   }
-  // NEW: date + time like "3 Aug, 6:42 PM" used for the "Delivered, ..." tag
+  // date + time like "3 Aug, 6:42 PM" used for the "Delivered, ..." tag
   function fmtDateShortTime(d){
     var dt = new Date(d);
     var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -317,7 +328,7 @@
     });
   }
 
-  // NEW: loader overlay controls
+  // loader overlay controls
   function adShowLoader(){
     var ov = document.getElementById('adLoaderOverlay');
     if(ov) ov.classList.add('show');
@@ -327,7 +338,7 @@
     if(ov) ov.classList.remove('show');
   }
 
-  // NEW: toast notification controls
+  // toast notification controls
   var adToastTimer = null;
   function adShowToast(msg, isError){
     var t = document.getElementById('adToast');
@@ -381,7 +392,7 @@
     }
   }
 
-  // NEW: live real-time clock in the header, updates every second
+  // live real-time clock in the header, updates every second
   var adClockTimer = null;
   function adStartClock(){
     function tick(){
@@ -515,7 +526,7 @@
         deliveredTag = '<span class="addeliveredtag">Delivered, ' + fmtDateShortTime(dDate) + '</span>';
       }
 
-      // NEW: "Cancelled by you" / "Cancelled by Customer" tag next to the CANCELLED badge
+      // "Cancelled by you" / "Cancelled by Customer" tag next to the CANCELLED badge
       var cancelledTag = '';
       if(order.status === 'cancelled'){
         cancelledTag = order.cancelled_by === 'admin'
@@ -532,8 +543,14 @@
         actionsHtml = '<button class="adactionbtn ship" onclick="adMarkStatus(\'' + order.id + '\',\'shipped\')">Mark Shipped</button>'
           + '<button class="adactionbtn cancel" onclick="adAdminCancelOrder(\'' + order.id + '\')">Cancel Order</button>';
       } else if(order.status === 'shipped'){
-        actionsHtml = '<button class="adactionbtn deliver" onclick="adMarkStatus(\'' + order.id + '\',\'delivered\')">Mark Delivered</button>'
+        // NEW: shipped orders now move to "Out for Delivery" first,
+        // not straight to Delivered. Cancel still allowed here.
+        actionsHtml = '<button class="adactionbtn ship" onclick="adMarkStatus(\'' + order.id + '\',\'out_for_delivery\')">Mark Out for Delivery</button>'
           + '<button class="adactionbtn cancel" onclick="adAdminCancelOrder(\'' + order.id + '\')">Cancel Order</button>';
+      } else if(order.status === 'out_for_delivery'){
+        // NEW: final step before Delivered. No cancel here — the order
+        // is already with the delivery agent.
+        actionsHtml = '<button class="adactionbtn deliver" onclick="adMarkStatus(\'' + order.id + '\',\'delivered\')">Mark Delivered</button>';
       } else if(order.status === 'cancelled'){
         var byText = order.cancelled_by === 'admin' ? '(by you)' : '(by Customer)';
         actionsHtml = '<span style="font-size:12.5px;color:#767e8c;">Order cancelled. ' + byText + '</span>';
@@ -642,7 +659,10 @@
     }
     await adLoadOrders();
     adHideLoader();
-    var label = newStatus === 'shipped' ? 'Customer Order Shipped' : (newStatus === 'delivered' ? 'Customer Order Delivered' : 'Order Updated');
+    var label = newStatus === 'shipped' ? 'Customer Order Shipped'
+      : newStatus === 'out_for_delivery' ? 'Order Marked Out for Delivery'
+      : newStatus === 'delivered' ? 'Customer Order Delivered'
+      : 'Order Updated';
     adShowToast(label, false);
   };
 
