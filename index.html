@@ -1,390 +1,485 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>Live Train Status | IRCTC Style</title>
-
-<meta name="description" content="Check Real Live Train Running Status">
-<meta name="theme-color" content="#0b5ed7">
-
-<link rel="stylesheet" href="style.css">
-
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-
-<link rel="stylesheet"
-href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-
-</head>
-
-<body>
-
-<div class="bg-animation"></div>
-
-<header>
-
-<div class="logo">
-
-<i class="fa-solid fa-train-subway"></i>
-
-<div>
-
-<h2>Train Live Status</h2>
-
-<p>Real Time Running Information</p>
-
-</div>
-
-</div>
-
-</header>
-
-<section class="hero">
-
-<div class="search-card">
-
-<h1>
-
-<i class="fa-solid fa-train"></i>
-
-Live Train Running Status
-
-</h1>
-
-<p>
-
-Enter Train Number to check Live Running Status
-
-</p>
-
-<div class="search-box">
-
-<input
-type="number"
-id="trainNumber"
-placeholder="Enter Train Number">
-
-<button id="searchBtn">
-
-<i class="fa-solid fa-magnifying-glass"></i>
-
-Search
-
-</button>
-
-</div>
-
-</div>
-
-</section>
-
-<section id="loading" class="loading hidden">
-
-<div class="loader"></div>
-
-<h3>Fetching Live Status...</h3>
-
-<p>Please Wait</p>
-
-</section>
-
-<section id="result" class="result hidden">
-
-<div class="top-card">
-
-<div class="train-left">
-
-<div class="train-icon">
-
-<i class="fa-solid fa-train"></i>
-
-</div>
-
-<div>
-
-<h2 id="trainName">
-
-Train Name
-
-</h2>
-
-<p id="trainNo">
-
-Train Number
-
-</p>
-
-</div>
-
-</div>
-
-<div class="status-badge" id="statusBadge">
-
-Running
-
-</div>
-
-</div>
-
-<!-- ===========================
-LIVE INFO BAR
-Part 3A
-=========================== -->
-
-<div class="live-info-bar">
-
-    <div class="info-chip">
-
-        <span class="chip-title">
-            Journey Date
-        </span>
-
-        <span id="journeyDate">
-            --
-        </span>
-
+<!-- ============================================================
+     ADMIN PANEL — paste this whole thing as the BODY (HTML view)
+     of a new Blogger Page. Set the page's custom URL to: admin
+     (final URL: /p/admin.html) — don't link this anywhere public.
+
+     UPDATED:
+       - Shows the customer's email (order.user_email) on each card
+         — only populated for orders placed via the updated checkout
+         page; older orders will show "—".
+       - "Mark Delivered" now also stamps delivered_at, and the card
+         shows "Delivered, 7 Aug" next to the status badge.
+
+     Requires (run once in Supabase SQL editor, if not already done):
+       alter table orders add column if not exists user_email text;
+       alter table orders add column if not exists delivered_at timestamptz;
+     ============================================================ -->
+
+<!-- ===== CRITICAL FIX: clears a leftover overlay flag from the main
+     theme that was causing this page to stay invisible forever, and
+     forces the page visible on EVERY screen size. The theme's own
+     fixed header + page-loader only un-hide themselves on mobile
+     (<=768px) — on laptop/desktop they were left covering the page,
+     which is why this looked blank only on laptop. Must run first,
+     before anything else. ===== -->
+<script>
+  try { sessionStorage.removeItem('overlayOpen'); } catch(e){}
+  document.documentElement.style.visibility = 'visible';
+  document.body.style.visibility = 'visible';
+  document.body.classList.add('ad-admin-page');
+
+  function adForceShow(){
+    document.documentElement.style.visibility = 'visible';
+    document.body.style.visibility = 'visible';
+    var pl = document.getElementById('pageLoader');
+    if(pl) pl.classList.remove('show');
+  }
+  adForceShow();
+  document.addEventListener('DOMContentLoaded', adForceShow);
+  window.addEventListener('load', adForceShow);
+  setTimeout(adForceShow, 300);
+  setTimeout(adForceShow, 1500);
+
+  // Safety stubs in case the site-wide theme script still tries to
+  // call these (they don't exist on this page) — prevents a crash.
+  window.openCartDrawer = window.openCartDrawer || function(){};
+  window.openAccountPageFull = window.openAccountPageFull || function(){};
+  window.openCategoriesPage = window.openCategoriesPage || function(){};
+</script>
+
+<!-- Visible error banner: if any JS below fails, you'll SEE why
+     instead of a blank page. -->
+<div id="adFatalError" style="display:none;background:#fdecea;color:#b71c1c;padding:14px 18px;font:13.5px monospace;border-bottom:2px solid #e11d48;white-space:pre-wrap;"></div>
+<script>
+  window.addEventListener('error', function(e){
+    var box = document.getElementById('adFatalError');
+    if(box){
+      box.style.display = 'block';
+      box.textContent = 'Admin page error: ' + e.message + ' (line ' + e.lineno + ')';
+    }
+  });
+</script>
+
+<div class="adwrap">
+
+  <!-- LOGIN SCREEN -->
+  <div class="adlogin" id="adLoginScreen">
+    <div class="adloginbox">
+      <h2>Admin Login</h2>
+      <p class="adloginsub">Trikund Printers — Order Management</p>
+      <div class="adfield">
+        <label>Email</label>
+        <input id="adEmail" placeholder="admin@example.com" type="email"/>
+      </div>
+      <div class="adfield">
+        <label>Password</label>
+        <input id="adPassword" placeholder="••••••••" type="password"/>
+      </div>
+      <p class="adloginerr" id="adLoginErr" style="display:none;"></p>
+      <button class="adloginbtn" id="adLoginBtn" onclick="adDoLogin()" type="button">Log In</button>
+    </div>
+  </div>
+
+  <!-- ADMIN DASHBOARD -->
+  <div class="addash" id="adDashboard" style="display:none;">
+    <header class="adheader">
+      <h1>Orders — Admin</h1>
+      <div class="adheaderright">
+        <span id="adAdminEmail"></span>
+        <button class="adlogoutbtn" onclick="adDoLogout()" type="button">Logout</button>
+      </div>
+    </header>
+
+    <div class="adfilterbar">
+      <button class="adfilterbtn active" data-filter="all" onclick="adSetFilter('all',this)">All</button>
+      <button class="adfilterbtn" data-filter="placed" onclick="adSetFilter('placed',this)">Placed</button>
+      <button class="adfilterbtn" data-filter="cancel_requested" onclick="adSetFilter('cancel_requested',this)">Cancel Requests</button>
+      <button class="adfilterbtn" data-filter="shipped" onclick="adSetFilter('shipped',this)">Shipped</button>
+      <button class="adfilterbtn" data-filter="delivered" onclick="adSetFilter('delivered',this)">Delivered</button>
+      <button class="adfilterbtn" data-filter="cancelled" onclick="adSetFilter('cancelled',this)">Cancelled</button>
+      <button class="adrefreshbtn" onclick="adLoadOrders()" type="button">⟳ Refresh</button>
     </div>
 
-    <div class="info-chip">
-
-        <span class="chip-title">
-            Last Updated
-        </span>
-
-        <span id="lastUpdated">
-            --
-        </span>
-
-    </div>
-
-    <div class="info-chip">
-
-        <span class="chip-title">
-            Status
-        </span>
-
-        <span id="liveStatus">
-            LIVE
-        </span>
-
-    </div>
-
-    <button
-        id="refreshBtn"
-        class="refresh-btn">
-
-        🔄 Refresh
-
-    </button>
+    <div id="adOrdersList" class="adorderslist"></div>
+  </div>
 
 </div>
 
-<!-- ===========================
-Journey Summary
-Part 3B
-=========================== -->
-
-<div class="journey-summary">
-
-    <div class="summary-box">
-
-        <div class="summary-title">
-            Journey Time
-        </div>
-
-        <div
-            id="journeyTime"
-            class="summary-value">
-            --
-        </div>
-
-    </div>
-
-    <div class="summary-box">
-
-        <div class="summary-title">
-            Run Days
-        </div>
-
-        <div
-            id="runDays"
-            class="summary-value">
-            --
-        </div>
-
-    </div>
-
-    <div class="summary-box">
-
-        <div class="summary-title">
-            Distance
-        </div>
-
-        <div
-            id="totalDistance"
-            class="summary-value">
-            --
-        </div>
-
-    </div>
-
-</div>
-
-
-<div class="grid">
-
-<div class="info-card">
-
-<span>Source</span>
-
-<h3 id="source">
-
---
-
-</h3>
-
-</div>
-
-<div class="info-card">
-
-<span>Destination</span>
-
-<h3 id="destination">
-
---
-
-</h3>
-
-</div>
-
-<div class="info-card">
-
-<span>Current Station</span>
-
-<h3 id="currentStation">
-
---
-
-</h3>
-
-</div>
-
-<div class="info-card">
-
-<span>Next Station</span>
-
-<h3 id="nextStation">
-
---
-
-</h3>
-
-</div>
-
-<div class="info-card">
-
-<span>Platform</span>
-
-<h3 id="platform">
-
---
-
-</h3>
-
-</div>
-
-<div class="info-card">
-
-<span>Delay</span>
-
-<h3 id="delay">
-
-0 Min
-
-</h3>
-
-</div>
-
-<div class="info-card">
-
-<span>ETA</span>
-
-<h3 id="eta">
-
---
-
-</h3>
-
-</div>
-
-<div class="info-card">
-
-<span>ETD</span>
-
-<h3 id="etd">
-
---
-
-</h3>
-
-</div>
-
-</div>
-
-<div class="journey">
-
-<h2>
-
-<i class="fa-solid fa-route"></i>
-
-Journey Route
-
-</h2>
-
-<div class="route-box">
-
-    <div class="route-title">
-
-        🚆 Live Route Timeline
-
-    </div>
-
-    <div
-        id="routeTimeline"
-        class="routeTimeline">
-
-    </div>
-
-</div>
-
-</div>
-
-</section>
-
-<footer>
-
-<p>
-
-© 2026 Live Train Status
-
-</p>
-
-<p>
-
-Powered by RapidAPI
-
-</p>
-
-</footer>
-
-<script src="config.js"></script>
-
-<script src="script.js"></script>
-
-</body>
-</html>
+<style>
+  .adwrap *{box-sizing:border-box;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;}
+
+  /* Login */
+  .adlogin{min-height:70vh;display:flex;align-items:center;justify-content:center;background:#f4f6f7;padding:20px;}
+  .adloginbox{background:#fff;border-radius:16px;padding:32px 28px;max-width:360px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.08);}
+  .adloginbox h2{margin:0 0 4px;font-size:22px;color:#1e2430;}
+  .adloginsub{margin:0 0 22px;font-size:13px;color:#767e8c;}
+  .adfield{margin-bottom:14px;}
+  .adfield label{display:block;font-size:12.5px;font-weight:700;color:#1e2430;margin-bottom:6px;}
+  .adfield input{width:100%;padding:11px 13px;border:1.5px solid #e0e0e0;border-radius:9px;font-size:14px;outline:none;}
+  .adfield input:focus{border-color:#0f766e;}
+  .adloginerr{color:#e11d48;font-size:13px;margin:6px 0 0;}
+  .adloginbtn{width:100%;margin-top:8px;background:#0f766e;color:#fff;border:none;padding:12px;border-radius:9px;font-weight:700;font-size:14.5px;cursor:pointer;}
+  .adloginbtn:hover{background:#0b5b54;}
+  .adloginbtn:disabled{opacity:.6;cursor:default;}
+
+  /* Dashboard */
+  .addash{background:#f4f6f7;min-height:70vh;padding:20px;}
+  .adheader{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px;}
+  .adheader h1{font-size:22px;margin:0;color:#1e2430;}
+  .adheaderright{display:flex;align-items:center;gap:12px;font-size:13px;color:#767e8c;}
+  .adlogoutbtn{background:#fff;border:1.5px solid #e0e0e0;padding:8px 16px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;color:#1e2430;}
+  .adlogoutbtn:hover{background:#fdecea;border-color:#e11d48;color:#e11d48;}
+
+  .adfilterbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;align-items:center;}
+  .adfilterbtn{background:#fff;border:1.5px solid #e0e0e0;padding:8px 14px;border-radius:20px;font-size:12.5px;font-weight:700;cursor:pointer;color:#555;}
+  .adfilterbtn.active{background:#0f766e;color:#fff;border-color:#0f766e;}
+  .adrefreshbtn{margin-left:auto;background:#fff;border:1.5px solid #e0e0e0;padding:8px 14px;border-radius:20px;font-size:12.5px;font-weight:700;cursor:pointer;color:#555;}
+
+  .adorderslist{display:flex;flex-direction:column;gap:14px;}
+  .adordercard{background:#fff;border-radius:14px;border:1px solid #e7eaec;padding:16px 18px;}
+  .adordertop{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px;align-items:center;}
+  .adorderid{font-size:12px;color:#767e8c;font-family:monospace;}
+  .adorderdate{font-size:12px;color:#767e8c;}
+  .adbadge{display:inline-block;padding:4px 10px;border-radius:20px;font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;}
+  .adbadge.placed{background:#e6f7f0;color:#1a7f37;}
+  .adbadge.cancel_requested{background:#fff7ed;color:#b45309;}
+  .adbadge.cancelled{background:#fdecea;color:#e11d48;}
+  .adbadge.shipped{background:#eef3ff;color:#2874f0;}
+  .adbadge.delivered{background:#eef7ff;color:#0f766e;}
+
+  /* NEW: "Delivered, 7 Aug" tag next to the badge */
+  .adbadgewrap{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .addeliveredtag{font-size:11.5px;color:#0f766e;font-weight:700;}
+
+  .aditemsrow{display:flex;gap:10px;overflow-x:auto;padding:6px 0;margin-bottom:10px;}
+  .aditemthumb{width:52px;height:52px;border-radius:8px;object-fit:cover;background:#f2f2f2;flex-shrink:0;}
+
+  .adcustomer{font-size:13px;color:#333;margin-bottom:4px;}
+  .adcustomer b{color:#1e2430;}
+  /* NEW: email line */
+  .ademail{font-size:12.5px;color:#767e8c;margin-bottom:8px;}
+  .ademail b{color:#1e2430;font-weight:600;}
+  .adaddr{font-size:12.5px;color:#767e8c;margin-bottom:12px;line-height:1.5;}
+
+  .addeliveryrow{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
+  .addeliveryrow label{font-size:12.5px;font-weight:700;color:#1e2430;}
+  .addeliveryrow input[type="date"]{padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:13px;}
+  .addeliveryrow button{background:#0f766e;color:#fff;border:none;padding:7px 14px;border-radius:7px;font-size:12.5px;font-weight:700;cursor:pointer;}
+
+  .adactions{display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid #f0f0f0;padding-top:12px;}
+  .adactionbtn{padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;border:none;cursor:pointer;}
+  .adactionbtn.confirm{background:#e11d48;color:#fff;}
+  .adactionbtn.reject{background:#f1f3f6;color:#333;}
+  .adactionbtn.ship{background:#2874f0;color:#fff;}
+  .adactionbtn.deliver{background:#0f766e;color:#fff;}
+  .adactionbtn:disabled{opacity:.5;cursor:default;}
+
+  .adempty{text-align:center;padding:60px 20px;color:#767e8c;font-size:14px;}
+
+  /* Light desktop polish — cards a bit wider / grid on large screens */
+  @media(min-width:1000px){
+    .addash{padding:24px 32px;}
+    .adorderslist{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  }
+
+  /* ===== NEW: neutralise the site-wide fixed header / cat-bar /
+     bottom-nav / page-loader on THIS page, on EVERY screen size.
+     The theme only hides these on mobile — on laptop they were
+     staying fixed on top (z-index 99999) and covering the page. ===== */
+  body.ad-admin-page .site-header,
+  body.ad-admin-page .cat-bar,
+  body.ad-admin-page .bottom-nav,
+  body.ad-admin-page .mobile-back-header,
+  body.ad-admin-page .post-buy-bar,
+  body.ad-admin-page .page-loader{
+    display:none !important;
+  }
+  body.ad-admin-page .wrap{
+    padding-top:16px !important;
+  }
+  body.ad-admin-page{
+    padding-bottom:0 !important;
+    visibility:visible !important;
+  }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+(function(){
+  var SUPABASE_URL = 'https://cblfmqcszdungpkbfrof.supabase.co';
+  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNibGZtcWNzemR1bmdwa2Jmcm9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyMjU2MTAsImV4cCI6MjEwMDgwMTYxMH0._pOV5pHVGlE-Fl73hZ6VouR0atfq3xRVoui3WxESy9g';
+  var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  var allOrders = [];
+  var currentFilter = 'all';
+
+  function money(n){ return '₹' + Math.round(n || 0).toLocaleString('en-IN'); }
+  function fmtDateTime(d){
+    var dt = new Date(d);
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return months[dt.getMonth()] + ' ' + dt.getDate() + ', ' + dt.getFullYear() + ' ' + dt.getHours() + ':' + String(dt.getMinutes()).padStart(2,'0');
+  }
+  // NEW: short date like "7 Aug" used for the "Delivered, 7 Aug" tag
+  function fmtDateShort(d){
+    var dt = new Date(d);
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return dt.getDate() + ' ' + months[dt.getMonth()];
+  }
+  function toDateInputValue(d){
+    var dt = new Date(d);
+    return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+  }
+  function escapeHtml(str){
+    return (str || '').toString().replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+
+  function initAdmin(){
+    sb.auth.getSession().then(function(res){
+      var session = res && res.data && res.data.session;
+      if(session){
+        checkIsAdmin(session.user.id).then(function(isAdmin){
+          if(isAdmin){
+            showDashboard(session.user);
+          } else {
+            sb.auth.signOut().then(function(){ showLogin('You are not authorized as admin.'); });
+          }
+        });
+      } else {
+        showLogin();
+      }
+    }).catch(function(err){
+      showLogin('Session check failed: ' + err.message);
+    });
+  }
+
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', initAdmin);
+  } else {
+    initAdmin();
+  }
+
+  function checkIsAdmin(userId){
+    return sb.from('profiles').select('is_admin').eq('id', userId).maybeSingle().then(function(res){
+      return !!(res.data && res.data.is_admin === true);
+    });
+  }
+
+  function showLogin(errMsg){
+    document.getElementById('adLoginScreen').style.display = 'flex';
+    document.getElementById('adDashboard').style.display = 'none';
+    if(errMsg){
+      var e = document.getElementById('adLoginErr');
+      e.textContent = errMsg;
+      e.style.display = 'block';
+    }
+  }
+
+  function showDashboard(user){
+    document.getElementById('adLoginScreen').style.display = 'none';
+    document.getElementById('adDashboard').style.display = 'block';
+    document.getElementById('adAdminEmail').textContent = user.email;
+    adLoadOrders();
+  }
+
+  window.adDoLogin = async function(){
+    var email = document.getElementById('adEmail').value.trim();
+    var password = document.getElementById('adPassword').value;
+    var errEl = document.getElementById('adLoginErr');
+    var btn = document.getElementById('adLoginBtn');
+    errEl.style.display = 'none';
+
+    if(!email || !password){
+      errEl.textContent = 'Please enter email and password.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Logging in...';
+
+    try{
+      var res = await sb.auth.signInWithPassword({ email: email, password: password });
+
+      if(res.error){
+        btn.disabled = false;
+        btn.textContent = 'Log In';
+        errEl.textContent = res.error.message;
+        errEl.style.display = 'block';
+        return;
+      }
+
+      var isAdmin = await checkIsAdmin(res.data.user.id);
+      btn.disabled = false;
+      btn.textContent = 'Log In';
+
+      if(!isAdmin){
+        await sb.auth.signOut();
+        errEl.textContent = 'This account is not authorized as admin.';
+        errEl.style.display = 'block';
+        return;
+      }
+
+      showDashboard(res.data.user);
+    } catch(err){
+      btn.disabled = false;
+      btn.textContent = 'Log In';
+      errEl.textContent = 'Login failed: ' + err.message;
+      errEl.style.display = 'block';
+    }
+  };
+
+  window.adDoLogout = async function(){
+    await sb.auth.signOut();
+    showLogin();
+  };
+
+  // ===== LOAD ORDERS =====
+  window.adLoadOrders = async function(){
+    var list = document.getElementById('adOrdersList');
+    list.innerHTML = '<div class="adempty">Loading...</div>';
+    try{
+      var res = await sb.from('orders').select('*').order('created_at', { ascending: false });
+      if(res.error){
+        list.innerHTML = '<div class="adempty">Error loading orders: ' + escapeHtml(res.error.message) + '</div>';
+        return;
+      }
+      allOrders = res.data || [];
+      renderOrders();
+    } catch(err){
+      list.innerHTML = '<div class="adempty">Error loading orders: ' + escapeHtml(err.message) + '</div>';
+    }
+  };
+
+  window.adSetFilter = function(filter, btnEl){
+    currentFilter = filter;
+    document.querySelectorAll('.adfilterbtn').forEach(function(b){ b.classList.remove('active'); });
+    btnEl.classList.add('active');
+    renderOrders();
+  };
+
+  function renderOrders(){
+    var list = document.getElementById('adOrdersList');
+    var filtered = currentFilter === 'all' ? allOrders : allOrders.filter(function(o){ return o.status === currentFilter; });
+
+    if(!filtered.length){
+      list.innerHTML = '<div class="adempty">No orders in this view.</div>';
+      return;
+    }
+
+    var html = '';
+    filtered.forEach(function(order){
+      var items = order.items || [];
+      var addr = order.address || {};
+      var thumbs = items.map(function(it){
+        return '<img class="aditemthumb" src="' + (it.image||'') + '" alt="">';
+      }).join('');
+      var deliveryVal = toDateInputValue(order.delivery_date || new Date(new Date(order.created_at).getTime() + 5*24*60*60*1000));
+
+      // NEW: "Delivered, 7 Aug" tag shown next to the status badge
+      var deliveredTag = '';
+      if(order.status === 'delivered'){
+        var dDate = order.delivered_at || order.updated_at || order.created_at;
+        deliveredTag = '<span class="addeliveredtag">Delivered, ' + fmtDateShort(dDate) + '</span>';
+      }
+
+      var actionsHtml = '';
+      if(order.status === 'cancel_requested'){
+        actionsHtml =
+          '<button class="adactionbtn confirm" onclick="adConfirmCancel(\'' + order.id + '\')">Confirm Cancellation</button>'
+          + '<button class="adactionbtn reject" onclick="adRejectCancel(\'' + order.id + '\')">Reject (Keep Order)</button>';
+      } else if(order.status === 'placed'){
+        actionsHtml = '<button class="adactionbtn ship" onclick="adMarkStatus(\'' + order.id + '\',\'shipped\')">Mark Shipped</button>';
+      } else if(order.status === 'shipped'){
+        actionsHtml = '<button class="adactionbtn deliver" onclick="adMarkStatus(\'' + order.id + '\',\'delivered\')">Mark Delivered</button>';
+      } else if(order.status === 'cancelled'){
+        actionsHtml = '<span style="font-size:12.5px;color:#767e8c;">No actions available — order cancelled.</span>';
+      } else if(order.status === 'delivered'){
+        actionsHtml = '<span style="font-size:12.5px;color:#767e8c;">Order delivered.</span>';
+      }
+
+      html += '<div class="adordercard">'
+        + '<div class="adordertop">'
+        + '<div><div class="adorderid">#' + order.id + '</div><div class="adorderdate">' + fmtDateTime(order.created_at) + '</div></div>'
+        + '<div class="adbadgewrap"><span class="adbadge ' + order.status + '">' + order.status.replace('_',' ') + '</span>' + deliveredTag + '</div>'
+        + '</div>'
+        + '<div class="aditemsrow">' + thumbs + '</div>'
+        + '<div class="adcustomer"><b>' + escapeHtml(addr.name) + '</b> · ' + escapeHtml(addr.phone) + '</div>'
+        + '<div class="ademail">Email: <b>' + escapeHtml(order.user_email || '—') + '</b></div>'
+        + '<div class="adaddr">' + [addr.house, addr.road, addr.city + ', ' + addr.state + ' ' + addr.pincode].filter(Boolean).map(escapeHtml).join(', ') + '</div>'
+        + '<div class="adcustomer">Total: <b>' + money(order.total_amount) + '</b> · ' + (order.payment_method === 'cod' ? 'Cash on Delivery' : (order.payment_method||'').toUpperCase()) + '</div>'
+        + '<div class="addeliveryrow">'
+        + '<label>Delivery date:</label>'
+        + '<input type="date" id="addate-' + order.id + '" value="' + deliveryVal + '">'
+        + '<button onclick="adSaveDeliveryDate(\'' + order.id + '\')">Save</button>'
+        + '</div>'
+        + '<div class="adactions">' + actionsHtml + '</div>'
+        + '</div>';
+    });
+    list.innerHTML = html;
+  }
+
+  // ===== ACTIONS =====
+  window.adConfirmCancel = async function(orderId){
+    if(!confirm('Confirm cancellation for this order? This cannot be undone.')) return;
+    var res = await sb.from('orders')
+      .update({ status: 'cancelled' })
+      .eq('id', orderId)
+      .eq('status', 'cancel_requested')
+      .select();
+    if(!res.data || !res.data.length){
+      alert('Could not update — order state may have changed. Refreshing.');
+    }
+    adLoadOrders();
+  };
+
+  window.adRejectCancel = async function(orderId){
+    if(!confirm('Reject this cancellation request and keep the order as placed?')) return;
+    var res = await sb.from('orders')
+      .update({ status: 'placed' })
+      .eq('id', orderId)
+      .eq('status', 'cancel_requested')
+      .select();
+    if(!res.data || !res.data.length){
+      alert('Could not update — order state may have changed. Refreshing.');
+    }
+    adLoadOrders();
+  };
+
+  window.adMarkStatus = async function(orderId, newStatus){
+    // NEW: when marking delivered, stamp delivered_at so the customer
+    // page and this admin page can both show "Delivered, 7 Aug".
+    var updateObj = { status: newStatus };
+    if(newStatus === 'delivered'){
+      updateObj.delivered_at = new Date().toISOString();
+    }
+    var res = await sb.from('orders')
+      .update(updateObj)
+      .eq('id', orderId)
+      .select();
+    if(!res.data || !res.data.length){
+      alert('Could not update order.');
+    }
+    adLoadOrders();
+  };
+
+  window.adSaveDeliveryDate = async function(orderId){
+    var input = document.getElementById('addate-' + orderId);
+    var val = input.value;
+    if(!val) return;
+    var res = await sb.from('orders')
+      .update({ delivery_date: new Date(val).toISOString() })
+      .eq('id', orderId)
+      .select();
+    if(!res.data || !res.data.length){
+      alert('Could not save delivery date.');
+    } else {
+      input.style.borderColor = '#1a7f37';
+      setTimeout(function(){ input.style.borderColor = '#e0e0e0'; }, 1200);
+    }
+  };
+
+})();
+ 
+</script>
