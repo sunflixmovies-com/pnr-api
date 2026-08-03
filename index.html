@@ -31,6 +31,9 @@
        - NEW: each card now clearly labels "Order ID: #XXXXXXXX" (short
          id, matches what customers see) with the full id shown faintly
          next to it in brackets for when you need to search/copy it.
+       - NEW: "Cancelled by you" / "Cancelled by Customer" now also shows
+         the real date+time it happened (stamped in cancelled_at),
+         same as Shipped/Out for Delivery/Delivered.
 
      (all earlier features unchanged: customer email shown, admin cancel
      with Yes/No confirm + cancelled_by tracking, real-time clock, loader
@@ -42,6 +45,7 @@
        alter table orders add column if not exists shipped_at timestamptz;
        alter table orders add column if not exists out_for_delivery_at timestamptz;
        alter table orders add column if not exists delivered_at timestamptz;
+       alter table orders add column if not exists cancelled_at timestamptz;
 
      NOTE: if your "orders.status" column has a CHECK constraint that
      restricts which text values are allowed, you must also add
@@ -562,12 +566,13 @@
         outForDeliveryTag = '<span class="adoutfordeliverytag">Out for Delivery, ' + fmtDateShortTime(oDate) + '</span>';
       }
 
-      // "Cancelled by you" / "Cancelled by Customer" tag next to the CANCELLED badge
+      // "Cancelled by you" / "Cancelled by Customer" tag below the CANCELLED badge, with real date+time
       var cancelledTag = '';
       if(order.status === 'cancelled'){
+        var cDate = order.cancelled_at || order.updated_at || order.created_at;
         cancelledTag = order.cancelled_by === 'admin'
-          ? '<span class="adcancelledtag">Cancelled by you</span>'
-          : '<span class="adcancelledtag">Cancelled by Customer</span>';
+          ? '<span class="adcancelledtag">Cancelled by you, ' + fmtDateShortTime(cDate) + '</span>'
+          : '<span class="adcancelledtag">Cancelled by Customer, ' + fmtDateShortTime(cDate) + '</span>';
       }
 
       var actionsHtml = '';
@@ -622,7 +627,7 @@
     if(!confirm('Confirm cancellation for this order? This cannot be undone.')) return;
     adShowLoader();
     var res = await sb.from('orders')
-      .update({ status: 'cancelled', cancelled_by: 'customer' })
+      .update({ status: 'cancelled', cancelled_by: 'customer', cancelled_at: new Date().toISOString() })
       .eq('id', orderId)
       .eq('status', 'cancel_requested')
       .select();
@@ -660,7 +665,7 @@
     if(!confirm('Kya aap sach me is order ko cancel karna chahte hain? Yeh undo nahi ho sakta.')) return;
     adShowLoader();
     var res = await sb.from('orders')
-      .update({ status: 'cancelled', cancelled_by: 'admin' })
+      .update({ status: 'cancelled', cancelled_by: 'admin', cancelled_at: new Date().toISOString() })
       .eq('id', orderId)
       .select();
     if(!res.data || !res.data.length){
