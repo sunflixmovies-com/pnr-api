@@ -159,6 +159,7 @@
 
   .aditemsrow{display:flex;gap:10px;overflow-x:auto;padding:6px 0;margin-bottom:10px;}
   .aditemthumb{width:52px;height:52px;border-radius:8px;object-fit:cover;background:#f2f2f2;flex-shrink:0;}
+  .aditemsrow a{display:inline-block;flex-shrink:0;text-decoration:none;cursor:pointer;}
 
   .adcustomer{font-size:13px;color:#333;margin-bottom:4px;}
   .adcustomer b{color:#1e2430;}
@@ -394,7 +395,11 @@
       var items = order.items || [];
       var addr = order.address || {};
       var thumbs = items.map(function(it){
-        return '<img class="aditemthumb" src="' + (it.image||'') + '" alt="">';
+        var img = '<img class="aditemthumb" src="' + (it.image||'') + '" alt="">';
+        if(it.url){
+          return '<a href="' + escapeHtml(it.url) + '" target="_blank" rel="noopener">' + img + '</a>';
+        }
+        return img;
       }).join('');
       var deliveryVal = toDateInputValue(order.delivery_date || new Date(new Date(order.created_at).getTime() + 5*24*60*60*1000));
 
