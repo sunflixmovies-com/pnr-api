@@ -172,6 +172,7 @@
   .adactionbtn.reject{background:#f1f3f6;color:#333;}
   .adactionbtn.ship{background:#2874f0;color:#fff;}
   .adactionbtn.deliver{background:#0f766e;color:#fff;}
+  .adactionbtn.cancel{background:#e11d48;color:#fff;}
   .adactionbtn:disabled{opacity:.5;cursor:default;}
 
   .adempty{text-align:center;padding:60px 20px;color:#767e8c;font-size:14px;}
@@ -201,6 +202,9 @@
     padding-bottom:0 !important;
     visibility:visible !important;
   }
+  @media(max-width:768px){
+  .addeliveredtag{width:100%;}
+}
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -225,6 +229,14 @@
     var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return dt.getDate() + ' ' + months[dt.getMonth()];
   }
+  function fmtDateShortTime(d){
+  var dt = new Date(d);
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var h = dt.getHours(), m = String(dt.getMinutes()).padStart(2,'0');
+  var ampm = h>=12?'PM':'AM';
+  var h12 = h%12; if(h12===0) h12=12;
+  return dt.getDate()+' '+months[dt.getMonth()]+', '+h12+':'+m+' '+ampm;
+}
   function toDateInputValue(d){
     var dt = new Date(d);
     return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
@@ -381,7 +393,7 @@
       var deliveredTag = '';
       if(order.status === 'delivered'){
         var dDate = order.delivered_at || order.updated_at || order.created_at;
-        deliveredTag = '<span class="addeliveredtag">Delivered, ' + fmtDateShort(dDate) + '</span>';
+        deliveredTag = '<span class="addeliveredtag">Delivered, ' + fmtDateShortTime(dDate) + '</span>';
       }
 
       var actionsHtml = '';
@@ -389,10 +401,13 @@
         actionsHtml =
           '<button class="adactionbtn confirm" onclick="adConfirmCancel(\'' + order.id + '\')">Confirm Cancellation</button>'
           + '<button class="adactionbtn reject" onclick="adRejectCancel(\'' + order.id + '\')">Reject (Keep Order)</button>';
-      } else if(order.status === 'placed'){
-        actionsHtml = '<button class="adactionbtn ship" onclick="adMarkStatus(\'' + order.id + '\',\'shipped\')">Mark Shipped</button>';
-      } else if(order.status === 'shipped'){
-        actionsHtml = '<button class="adactionbtn deliver" onclick="adMarkStatus(\'' + order.id + '\',\'delivered\')">Mark Delivered</button>';
+ } else if(order.status === 'placed'){
+  actionsHtml = '<button class="adactionbtn ship" onclick="adMarkStatus(\'' + order.id + '\',\'shipped\')">Mark Shipped</button>'
+    + '<button class="adactionbtn cancel" onclick="adAdminCancelOrder(\'' + order.id + '\')">Cancel Order</button>';
+} else if(order.status === 'shipped'){
+  actionsHtml = '<button class="adactionbtn deliver" onclick="adMarkStatus(\'' + order.id + '\',\'delivered\')">Mark Delivered</button>'
+    + '<button class="adactionbtn cancel" onclick="adAdminCancelOrder(\'' + order.id + '\')">Cancel Order</button>';
+}
       } else if(order.status === 'cancelled'){
         actionsHtml = '<span style="font-size:12.5px;color:#767e8c;">No actions available — order cancelled.</span>';
       } else if(order.status === 'delivered'){
@@ -454,6 +469,17 @@
     if(newStatus === 'delivered'){
       updateObj.delivered_at = new Date().toISOString();
     }
+    window.adAdminCancelOrder = async function(orderId){
+  if(!confirm('Kya aap sach me is order ko cancel karna chahte hain? Yeh undo nahi ho sakta.')) return;
+  var res = await sb.from('orders')
+    .update({ status: 'cancelled' })
+    .eq('id', orderId)
+    .select();
+  if(!res.data || !res.data.length){
+    alert('Order cancel nahi ho paaya.');
+  }
+  adLoadOrders();
+};
     var res = await sb.from('orders')
       .update(updateObj)
       .eq('id', orderId)
