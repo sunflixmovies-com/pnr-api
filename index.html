@@ -16,15 +16,26 @@
          Delivered" (no cancel button here — order is already with the
          delivery agent, matches how the "shipped" stage used to work
          before "out for delivery" existed).
+       - NEW: "Mark Shipped" now stamps shipped_at and "Mark Out for
+         Delivery" now stamps out_for_delivery_at (delivered_at was
+         already being stamped). Each order card now shows the real
+         date+time next to the badge for whichever of these three
+         is the CURRENT status — e.g. "SHIPPED  Shipped, 4 Aug, 12:07 AM"
+         — same idea as the existing "Delivered, ..." tag.
+       - This same real timestamp is what the customer-facing orders
+         page now reads to show real dates on its stepper instead of
+         guessed ones.
 
-     (all earlier features unchanged: customer email shown, delivered_at
-     stamp + "Delivered, 3 Aug, 6:42 PM" tag, admin cancel with Yes/No
-     confirm + cancelled_by tracking, real-time clock, loader + toasts)
+     (all earlier features unchanged: customer email shown, admin cancel
+     with Yes/No confirm + cancelled_by tracking, real-time clock, loader
+     + toasts)
 
      Requires (run once in Supabase SQL editor, if not already done):
        alter table orders add column if not exists user_email text;
-       alter table orders add column if not exists delivered_at timestamptz;
        alter table orders add column if not exists cancelled_by text;
+       alter table orders add column if not exists shipped_at timestamptz;
+       alter table orders add column if not exists out_for_delivery_at timestamptz;
+       alter table orders add column if not exists delivered_at timestamptz;
 
      NOTE: if your "orders.status" column has a CHECK constraint that
      restricts which text values are allowed, you must also add
@@ -186,6 +197,8 @@
   .adbadgewrap{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
   .addeliveredtag{font-size:11.5px;color:#0f766e;font-weight:700;}
   .adcancelledtag{font-size:11.5px;color:#e11d48;font-weight:700;}
+  .adshippedtag{font-size:11.5px;color:#2874f0;font-weight:700;}
+  .adoutfordeliverytag{font-size:11.5px;color:#9333ea;font-weight:700;}
   .adreasonline{font-size:12.5px;color:#b45309;margin:-2px 0 10px;}
   .adreasonline b{color:#1e2430;}
 
@@ -265,6 +278,8 @@
   @media(max-width:768px){
     .addeliveredtag{width:100%;}
     .adcancelledtag{width:100%;}
+    .adshippedtag{width:100%;}
+    .adoutfordeliverytag{width:100%;}
   }
 
   /* ===== neutralise the site-wide fixed header / cat-bar /
@@ -518,12 +533,25 @@
       }).join('');
       var deliveryVal = toDateInputValue(order.delivery_date || new Date(new Date(order.created_at).getTime() + 5*24*60*60*1000));
 
-      // "Delivered, 3 Aug, 6:42 PM" tag shown next to the status badge
-      // (wraps to its own line on phone via the media query in <style>)
+      // Real date+time tags shown next to the status badge — one shows
+      // depending on whichever status the order is CURRENTLY in (wraps
+      // to its own line on phone via the media query in <style>)
       var deliveredTag = '';
       if(order.status === 'delivered'){
         var dDate = order.delivered_at || order.updated_at || order.created_at;
         deliveredTag = '<span class="addeliveredtag">Delivered, ' + fmtDateShortTime(dDate) + '</span>';
+      }
+
+      var shippedTag = '';
+      if(order.status === 'shipped'){
+        var sDate = order.shipped_at || order.updated_at || order.created_at;
+        shippedTag = '<span class="adshippedtag">Shipped, ' + fmtDateShortTime(sDate) + '</span>';
+      }
+
+      var outForDeliveryTag = '';
+      if(order.status === 'out_for_delivery'){
+        var oDate = order.out_for_delivery_at || order.updated_at || order.created_at;
+        outForDeliveryTag = '<span class="adoutfordeliverytag">Out for Delivery, ' + fmtDateShortTime(oDate) + '</span>';
       }
 
       // "Cancelled by you" / "Cancelled by Customer" tag next to the CANCELLED badge
@@ -561,7 +589,7 @@
       html += '<div class="adordercard">'
         + '<div class="adordertop">'
         + '<div><div class="adorderid">#' + order.id + '</div><div class="adorderdate">' + fmtDateTime(order.created_at) + '</div></div>'
-        + '<div class="adbadgewrap"><span class="adbadge ' + order.status + '">' + order.status.replace('_',' ') + '</span>' + deliveredTag + cancelledTag + '</div>'
+        + '<div class="adbadgewrap"><span class="adbadge ' + order.status + '">' + order.status.replace('_',' ') + '</span>' + shippedTag + outForDeliveryTag + deliveredTag + cancelledTag + '</div>'
         + '</div>'
         + (order.cancel_reason ? '<div class="adreasonline">Reason: <b>' + escapeHtml(order.cancel_reason) + '</b></div>' : '')
         + '<div class="aditemsrow">' + thumbs + '</div>'
@@ -638,9 +666,16 @@
 
   window.adMarkStatus = async function(orderId, newStatus){
     adShowLoader();
-    // when marking delivered, stamp delivered_at so the customer
-    // page and this admin page can both show "Delivered, 3 Aug, 6:42 PM".
+    // Stamp the real moment this status was set, so both this admin
+    // page and the customer orders page can show the actual date/time
+    // instead of a guessed one.
     var updateObj = { status: newStatus };
+    if(newStatus === 'shipped'){
+      updateObj.shipped_at = new Date().toISOString();
+    }
+    if(newStatus === 'out_for_delivery'){
+      updateObj.out_for_delivery_at = new Date().toISOString();
+    }
     if(newStatus === 'delivered'){
       updateObj.delivered_at = new Date().toISOString();
     }
