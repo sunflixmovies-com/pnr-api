@@ -14,6 +14,20 @@
          (real timestamp) saved — same fields the customer-side "See
          All Updates" popup reads, so it shows up there instantly via
          realtime.
+       - NEW: granular tracking sub-steps with real timestamps.
+         * While PLACED: two "Mark Done" rows — "Seller has
+           processed your order" (processed_at) and "Picked up by
+           delivery partner" (picked_up_at). Second one is disabled
+           until the first is marked done.
+         * "Mark Shipped" now opens a small modal asking for Courier
+           Name + Tracking ID (e.g. "Ekart Logistics" /
+           "FMPP3941633523") before moving the order to 'shipped' —
+           saved as courier_name / courier_tracking_id + shipped_at.
+         * While SHIPPED: one "Mark Done" row — "Received in the hub
+           nearest to customer" (hub_received_at).
+         All of these are read live by the customer orders page's
+         "See All Updates" popup with real date & time, via the
+         existing realtime subscription.
        - Everything else unchanged: PDF/Invoice icon on Shipped/Out
          for Delivery/Delivered, search by Order ID or Customer Name,
          live filter counts, out_for_delivery flow, real timestamps
@@ -28,6 +42,13 @@
        alter table orders add column if not exists delivered_at timestamptz;
        alter table orders add column if not exists cancelled_at timestamptz;
        alter table orders add column if not exists cancel_reason text;
+
+       -- NEW columns for the granular tracking sub-steps:
+       alter table orders add column if not exists processed_at timestamptz;
+       alter table orders add column if not exists picked_up_at timestamptz;
+       alter table orders add column if not exists courier_name text;
+       alter table orders add column if not exists courier_tracking_id text;
+       alter table orders add column if not exists hub_received_at timestamptz;
 
        -- for the human-readable Order ID (ORD-TRI4648AA style):
        alter table orders add column if not exists order_number text unique;
@@ -174,6 +195,23 @@
   </div>
 </div>
 
+<!-- ===== ADMIN MARK-SHIPPED MODAL (courier name + tracking id) ===== -->
+<div class="admodal-overlay" id="adShippedModal">
+  <div class="admodal-box">
+    <h3>Mark as Shipped</h3>
+    <p class="admodal-sub">Enter courier details for this shipment</p>
+    <label class="admodal-label">Courier Name</label>
+    <input class="admodal-input" id="adCourierName" placeholder="e.g. Ekart Logistics" type="text">
+    <label class="admodal-label" style="margin-top:10px;">Tracking ID</label>
+    <input class="admodal-input" id="adCourierTracking" placeholder="e.g. FMPP3941633523" type="text">
+    <p class="admodal-err" id="adShippedMsg" style="display:none;">Please enter courier name and tracking ID.</p>
+    <div class="admodal-actions">
+      <button class="admodal-btn admodal-no" type="button" onclick="adCloseShippedModal()">Back</button>
+      <button class="admodal-btn admodal-yes" type="button" style="background:#2874f0;" onclick="adSubmitShipped()">Confirm Shipped</button>
+    </div>
+  </div>
+</div>
+
 <style>
   .adwrap *{box-sizing:border-box;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;}
 
@@ -273,6 +311,17 @@
   .addeliveryrow input[type="date"]{padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:13px;}
   .addeliveryrow button{background:#0f766e;color:#fff;border:none;padding:7px 14px;border-radius:7px;font-size:12.5px;font-weight:700;cursor:pointer;}
 
+  /* ===== NEW: granular tracking sub-step rows shown inside the
+     Placed / Shipped cards ("Seller has processed your order",
+     "Picked up by delivery partner", "Received in hub", etc.) ===== */
+  .adsubsteps{border:1px dashed #dbe3e7;border-radius:10px;padding:10px 12px;margin-bottom:12px;background:#fafcfc;}
+  .adsubstep{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;font-size:12.5px;color:#333;}
+  .adsubstep + .adsubstep{border-top:1px dashed #e7eaec;}
+  .adsubstepdone{color:#0f766e;font-weight:700;}
+  .adsubstepbtn{background:#fff;border:1.5px solid #0f766e;color:#0f766e;padding:5px 12px;border-radius:20px;font-size:11.5px;font-weight:700;cursor:pointer;flex-shrink:0;}
+  .adsubstepbtn:hover{background:#e6f7f0;}
+  .adsubstepbtn:disabled{opacity:.45;cursor:not-allowed;border-color:#c7cdd1;color:#8a939e;}
+
   .adactions{display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid #f0f0f0;padding-top:12px;}
   .adactionbtn{padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;border:none;cursor:pointer;}
   .adactionbtn.confirm{background:#e11d48;color:#fff;}
@@ -324,7 +373,7 @@
   .adtoast.show{ top:18px; }
   .adtoast.error{ background:#e11d48; }
 
-  /* ===== Admin Cancel Order modal (reason required) ===== */
+  /* ===== Admin Cancel Order modal (reason required) / Mark Shipped modal ===== */
   .admodal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999999;display:none;align-items:center;justify-content:center;padding:20px;}
   .admodal-overlay.active{display:flex;}
   .admodal-box{background:#fff;border-radius:16px;padding:26px 24px;max-width:360px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.2);text-align:left;}
@@ -378,6 +427,8 @@
   var currentFilter = 'all';
   // id of the order currently targeted by the Cancel Order modal
   var adCancelTargetId = null;
+  // id of the order currently targeted by the Mark Shipped modal
+  var adShippedTargetId = null;
 
   // real SVG "document + download arrow" icon used for the
   // Invoice PDF button (replaces the old 📄 emoji everywhere)
@@ -647,6 +698,37 @@
     renderOrders();
   };
 
+  // ===== NEW: sub-step row builder for the granular tracking rows
+  // shown inside Placed / Shipped cards ("Seller has processed your
+  // order", "Picked up by delivery partner", "Received in hub", etc.) =====
+  function adSubstepRow(order, field, label, disabledReason){
+    if(order[field]){
+      return '<div class="adsubstep"><span class="adsubstepdone">✓ ' + escapeHtml(label) + ' — ' + fmtDateShortTime(order[field]) + '</span></div>';
+    }
+    var disabledAttr = disabledReason ? 'disabled title="' + escapeHtml(disabledReason) + '"' : '';
+    return '<div class="adsubstep"><span>' + escapeHtml(label) + '</span>'
+      + '<button class="adsubstepbtn" ' + disabledAttr + ' onclick="adMarkSubstep(\'' + order.id + '\',\'' + field + '\',\'' + escapeHtml(label).replace(/'/g,"\\'") + '\')">Mark Done</button></div>';
+  }
+
+  function adBuildSubsteps(order){
+    var html = '';
+    if(order.status === 'placed'){
+      html += '<div class="adsubsteps">';
+      html += adSubstepRow(order, 'processed_at', 'Seller has processed your order', null);
+      html += adSubstepRow(order, 'picked_up_at', 'Picked up by delivery partner', order.processed_at ? null : 'Mark "order processed" first');
+      html += '</div>';
+    } else if(order.status === 'shipped'){
+      var courierLine = (order.courier_name || order.courier_tracking_id) ? ((order.courier_name||'') + (order.courier_tracking_id ? ' - '+order.courier_tracking_id : '')) : '';
+      html += '<div class="adsubsteps">';
+      if(courierLine){
+        html += '<div class="adsubstep"><span class="adsubstepdone">✓ ' + escapeHtml(courierLine) + ' · Shipped — ' + fmtDateShortTime(order.shipped_at || order.created_at) + '</span></div>';
+      }
+      html += adSubstepRow(order, 'hub_received_at', 'Received in the hub nearest to customer', null);
+      html += '</div>';
+    }
+    return html;
+  }
+
   function renderOrders(){
     var list = document.getElementById('adOrdersList');
     var filtered = currentFilter === 'all' ? allOrders : allOrders.filter(function(o){ return o.status === currentFilter; });
@@ -728,7 +810,7 @@
           '<button class="adactionbtn confirm" onclick="adConfirmCancel(\'' + order.id + '\')">Confirm Cancellation</button>'
           + '<button class="adactionbtn reject" onclick="adRejectCancel(\'' + order.id + '\')">Reject (Keep Order)</button>';
       } else if(order.status === 'placed'){
-        actionsHtml = '<button class="adactionbtn ship" onclick="adMarkStatus(\'' + order.id + '\',\'shipped\')">Mark Shipped</button>'
+        actionsHtml = '<button class="adactionbtn ship" onclick="adOpenShippedModal(\'' + order.id + '\')">Mark Shipped</button>'
           + '<button class="adactionbtn cancel" onclick="adOpenAdminCancelModal(\'' + order.id + '\')">Cancel Order</button>';
       } else if(order.status === 'shipped'){
         // shipped orders now move to "Out for Delivery" first,
@@ -764,6 +846,7 @@
           + '<button onclick="adSaveDeliveryDate(\'' + order.id + '\')">Save</button>'
           + '</div>'
         ) : '')
+        + adBuildSubsteps(order)
         + '<div class="adactions">' + actionsHtml + '</div>'
         + '</div>';
     });
@@ -805,6 +888,82 @@
     await adLoadOrders();
     adHideLoader();
     adShowToast('Cancellation Rejected', false);
+  };
+
+  // ===== NEW: mark a granular tracking sub-step done (processed_at /
+  // picked_up_at / hub_received_at) with a real timestamp =====
+  window.adMarkSubstep = async function(orderId, field, label){
+    adShowLoader();
+    var updateObj = {};
+    updateObj[field] = new Date().toISOString();
+    var res;
+    try{
+      res = await sb.from('orders').update(updateObj).eq('id', orderId).select();
+    } catch(err){
+      adHideLoader();
+      adShowToast('Error: ' + err.message, true);
+      return;
+    }
+    if(!res.data || !res.data.length){
+      adHideLoader();
+      adShowToast('Could not update.', true);
+      return;
+    }
+    await adLoadOrders();
+    adHideLoader();
+    adShowToast(label + ' — marked done', false);
+  };
+
+  // ===== NEW: Mark Shipped modal (courier name + tracking id required) =====
+  window.adOpenShippedModal = function(orderId){
+    adShippedTargetId = orderId;
+    document.getElementById('adCourierName').value = '';
+    document.getElementById('adCourierTracking').value = '';
+    document.getElementById('adShippedMsg').style.display = 'none';
+    document.getElementById('adShippedModal').classList.add('active');
+  };
+
+  window.adCloseShippedModal = function(){
+    document.getElementById('adShippedModal').classList.remove('active');
+    adShippedTargetId = null;
+  };
+
+  window.adSubmitShipped = async function(){
+    var orderId = adShippedTargetId;
+    if(!orderId) return;
+
+    var courier = document.getElementById('adCourierName').value.trim();
+    var tracking = document.getElementById('adCourierTracking').value.trim();
+    var msgEl = document.getElementById('adShippedMsg');
+
+    if(!courier || !tracking){
+      msgEl.style.display = 'block';
+      return;
+    }
+
+    document.getElementById('adShippedModal').classList.remove('active');
+    adShowLoader();
+
+    var res = await sb.from('orders')
+      .update({
+        status: 'shipped',
+        shipped_at: new Date().toISOString(),
+        courier_name: courier,
+        courier_tracking_id: tracking
+      })
+      .eq('id', orderId)
+      .select();
+
+    adShippedTargetId = null;
+
+    if(!res.data || !res.data.length){
+      adHideLoader();
+      adShowToast('Could not mark shipped.', true);
+      return;
+    }
+    await adLoadOrders();
+    adHideLoader();
+    adShowToast('Customer Order Shipped', false);
   };
 
   // ===== ADMIN CANCEL ORDER MODAL (reason required) =====
