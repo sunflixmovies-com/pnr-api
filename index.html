@@ -4,19 +4,20 @@
      (final URL: /p/admin.html) — don't link this anywhere public.
 
      UPDATED (this version):
-       - NEW: Order ID now shows the real, human-readable order_number
-         column (e.g. "ORD-TRI4648AA") if it exists on the row, instead
-         of a random fragment of the UUID. Falls back to the old
-         UUID-fragment style automatically for any older order that
-         doesn't have an order_number yet, so nothing breaks.
-       - NEW: filter buttons (All, Placed, Cancel Requests, Shipped, Out
-         for Delivery, Delivered, Cancelled) now show a live count next
-         to each label, e.g. "All (12)", "Placed (6)".
+       - PDF/Invoice icon now shows on Shipped, Out for Delivery,
+         AND Delivered orders (earlier it only showed on Shipped).
+       - PDF icon replaced with a real SVG document icon (no more
+         emoji 📄) — styled as a small rounded button.
+       - Search box icon replaced with a crisper real SVG magnifying
+         glass, in a cleaner pill-shaped search field.
+       - Search already matches both Order ID (short or full UUID)
+         and Customer Name — kept and confirmed working.
 
-     (all earlier features unchanged: out_for_delivery status/flow,
-     real shipped/out_for_delivery/delivered timestamps shown per card,
-     customer email shown, admin cancel with Yes/No confirm + cancelled_by
-     tracking, real-time clock, loader + toasts)
+     (all earlier features unchanged: order_number human-readable ID,
+     live filter counts, out_for_delivery status/flow, real
+     shipped/out_for_delivery/delivered timestamps shown per card,
+     customer email shown, admin cancel with Yes/No confirm +
+     cancelled_by tracking, real-time clock, loader + toasts)
 
      Requires (run once in Supabase SQL editor, if not already done):
        alter table orders add column if not exists user_email text;
@@ -135,6 +136,10 @@
       <button class="adfilterbtn" data-filter="out_for_delivery" onclick="adSetFilter('out_for_delivery',this)">Out for Delivery</button>
       <button class="adfilterbtn" data-filter="delivered" onclick="adSetFilter('delivered',this)">Delivered</button>
       <button class="adfilterbtn" data-filter="cancelled" onclick="adSetFilter('cancelled',this)">Cancelled</button>
+      <div class="adsearchbox">
+        <svg class="adsearchicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7.5"></circle><line x1="21" y1="21" x2="16.2" y2="16.2"></line></svg>
+        <input type="text" id="adSearchInput" placeholder="Search Order ID or Name..." oninput="adOnSearchInput()">
+      </div>
       <button class="adrefreshbtn" onclick="adLoadOrders()" type="button">⟳ Refresh</button>
     </div>
 
@@ -174,6 +179,14 @@
   .adfilterbtn.active{background:#0f766e;color:#fff;border-color:#0f766e;}
   .adrefreshbtn{margin-left:auto;background:#fff;border:1.5px solid #e0e0e0;padding:8px 14px;border-radius:20px;font-size:12.5px;font-weight:700;cursor:pointer;color:#555;}
 
+  /* ===== polished pill-shaped search box with a real SVG icon in a
+     soft circle, closer to the reference screenshot look ===== */
+  .adsearchbox{position:relative;display:flex;align-items:center;background:#fff;border:1.5px solid #e0e0e0;border-radius:24px;padding:0;transition:border-color .15s,box-shadow .15s;}
+  .adsearchbox:focus-within{border-color:#0f766e;box-shadow:0 0 0 3px rgba(15,118,110,.12);}
+  .adsearchicon{position:absolute;left:12px;width:15px;height:15px;color:#8a939e;pointer-events:none;}
+  .adsearchbox:focus-within .adsearchicon{color:#0f766e;}
+  .adsearchbox input{border:none;background:transparent;padding:9px 14px 9px 34px;border-radius:24px;font-size:12.5px;width:230px;outline:none;color:#1e2430;}
+
   .adorderslist{display:flex;flex-direction:column;gap:14px;}
   .adordercard{background:#fff;border-radius:14px;border:1px solid #e7eaec;padding:16px 18px;}
   .adordertop{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px;align-items:center;}
@@ -192,8 +205,25 @@
      wraps to its own line on mobile — see media query below. */
   .adbadgewrap{display:flex;flex-direction:column;align-items:flex-end;gap:4px;}
   .adbadgerow{display:flex;align-items:center;gap:8px;}
-  .adpdficon{cursor:pointer;font-size:17px;line-height:1;user-select:none;}
-  .adpdficon:hover{opacity:.7;}
+
+  /* ===== real SVG "download invoice" icon button (replaces the old
+     📄 emoji), color-matched to whichever status it's shown on ===== */
+  .adpdficon{
+    cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;
+    width:28px;height:28px;border-radius:8px;
+    background:#eef3ff;color:#2874f0;
+    transition:background .15s,transform .1s;
+    flex-shrink:0;
+  }
+  .adpdficon svg{width:15px;height:15px;}
+  .adpdficon:hover{background:#dde9ff;transform:translateY(-1px);}
+  .adpdficon:active{transform:translateY(0);}
+  .adbadge.out_for_delivery ~ .adpdficon,
+  .adordercard .adbadgerow .adpdficon.pdf-out_for_delivery{background:#fdf4ff;color:#9333ea;}
+  .adordercard .adbadgerow .adpdficon.pdf-delivered{background:#eef7ff;color:#0f766e;}
+  .adordercard .adbadgerow .adpdficon.pdf-shipped{background:#eef3ff;color:#2874f0;}
+
   .addeliveredtag{font-size:11.5px;color:#0f766e;font-weight:700;text-align:right;}
   .adcancelledtag{font-size:11.5px;color:#e11d48;font-weight:700;text-align:right;}
   .adshippedtag{font-size:11.5px;color:#2874f0;font-weight:700;text-align:right;}
@@ -304,6 +334,10 @@
 
   var allOrders = [];
   var currentFilter = 'all';
+
+  // real SVG "document + download arrow" icon used for the
+  // Invoice PDF button (replaces the old 📄 emoji everywhere)
+  var AD_PDF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="11" x2="12" y2="17"></line><polyline points="9 14 12 17 15 14"></polyline></svg>';
 
   // base labels + live counts for the filter bar buttons
   var adFilterLabels = {
@@ -560,9 +594,28 @@
     renderOrders();
   };
 
+  // real search — filters the currently visible list by Order ID
+  // (short display id or full UUID) or customer name, live as you type.
+  var adSearchQuery = '';
+  window.adOnSearchInput = function(){
+    var input = document.getElementById('adSearchInput');
+    adSearchQuery = (input ? input.value : '').trim().toLowerCase();
+    renderOrders();
+  };
+
   function renderOrders(){
     var list = document.getElementById('adOrdersList');
     var filtered = currentFilter === 'all' ? allOrders : allOrders.filter(function(o){ return o.status === currentFilter; });
+
+    if(adSearchQuery){
+      filtered = filtered.filter(function(o){
+        var addr = o.address || {};
+        var idMatch = displayOrderId(o).toLowerCase().indexOf(adSearchQuery) > -1
+          || (o.id || '').toLowerCase().indexOf(adSearchQuery) > -1;
+        var nameMatch = (addr.name || '').toLowerCase().indexOf(adSearchQuery) > -1;
+        return idMatch || nameMatch;
+      });
+    }
 
     if(!filtered.length){
       list.innerHTML = '<div class="adempty">No orders in this view.</div>';
@@ -592,17 +645,24 @@
       }
 
       var shippedTag = '';
-      var pdfIconHtml = '';
       if(order.status === 'shipped'){
         var sDate = order.shipped_at || order.updated_at || order.created_at;
         shippedTag = '<span class="adshippedtag">Shipped, ' + fmtDateShortTime(sDate) + '</span>';
-        pdfIconHtml = '<span class="adpdficon" title="Download Invoice PDF" onclick="adDownloadShippedInvoice(\'' + order.id + '\')">📄</span>';
       }
 
       var outForDeliveryTag = '';
       if(order.status === 'out_for_delivery'){
         var oDate = order.out_for_delivery_at || order.updated_at || order.created_at;
         outForDeliveryTag = '<span class="adoutfordeliverytag">Out for Delivery, ' + fmtDateShortTime(oDate) + '</span>';
+      }
+
+      // Invoice PDF icon — now shown on Shipped, Out for Delivery AND
+      // Delivered (earlier it only appeared on Shipped). Color of the
+      // icon button matches whichever status it's on.
+      var pdfIconHtml = '';
+      if(order.status === 'shipped' || order.status === 'out_for_delivery' || order.status === 'delivered'){
+        var pdfColorClass = 'pdf-' + order.status;
+        pdfIconHtml = '<span class="adpdficon ' + pdfColorClass + '" title="Download Invoice PDF" onclick="adDownloadShippedInvoice(\'' + order.id + '\')">' + AD_PDF_SVG + '</span>';
       }
 
       // "Cancelled by you" / "Cancelled by Customer" tag below the CANCELLED badge, with real date+time
@@ -771,7 +831,7 @@
     }
   };
 
-  // ===== SHIPPED INVOICE (real downloadable PDF) =====
+  // ===== INVOICE (real downloadable PDF) =====
   // Fill these in with your real business contact/GST details if you
   // have them — left blank by default so nothing false ever prints on
   // the invoice. Billing Address is intentionally left blank per request.
