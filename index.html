@@ -219,7 +219,7 @@
   .adactionbtn.reject{background:#f1f3f6;color:#333;}
   .adactionbtn.ship{background:#2874f0;color:#fff;}
 .adactionbtn.outfordelivery{background:#9333ea;color:#fff;}
-  .adactionbtn.deliver{background:#0f766e;color:#fff;}
+  .adactionbtn.deliver{background:#ff9800;color:#fff;}
   /* Cancel Order button (shown next to Mark Shipped / Mark Out for Delivery) */
   .adactionbtn.cancel{background:#e11d48;color:#fff;}
   .adactionbtn:disabled{opacity:.5;cursor:default;}
@@ -616,11 +616,13 @@
         + '<div class="ademail">Email: <b>' + escapeHtml(order.user_email || '—') + '</b></div>'
         + '<div class="adaddr">' + [addr.house, addr.road, addr.city + ', ' + addr.state + ' ' + addr.pincode].filter(Boolean).map(escapeHtml).join(', ') + '</div>'
         + '<div class="adcustomer">Total: <b>' + money(order.total_amount) + '</b> · ' + (order.payment_method === 'cod' ? 'Cash on Delivery' : (order.payment_method||'').toUpperCase()) + '</div>'
-        + '<div class="addeliveryrow">'
-        + '<label>Delivery date:</label>'
-        + '<input type="date" id="addate-' + order.id + '" value="' + deliveryVal + '">'
-        + '<button onclick="adSaveDeliveryDate(\'' + order.id + '\')">Save</button>'
-        + '</div>'
+    + (order.status !== 'delivered' ? (
+  '<div class="addeliveryrow">'
+  + '<label>Delivery date:</label>'
+  + '<input type="date" id="addate-' + order.id + '" value="' + deliveryVal + '">'
+  + '<button onclick="adSaveDeliveryDate(\'' + order.id + '\')">Save</button>'
+  + '</div>'
+) : '')
         + '<div class="adactions">' + actionsHtml + '</div>'
         + '</div>';
     });
