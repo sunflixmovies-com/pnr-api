@@ -4,20 +4,21 @@
      (final URL: /p/admin.html) — don't link this anywhere public.
 
      UPDATED (this version):
-       - PDF/Invoice icon now shows on Shipped, Out for Delivery,
-         AND Delivered orders (earlier it only showed on Shipped).
-       - PDF icon replaced with a real SVG document icon (no more
-         emoji 📄) — styled as a small rounded button.
-       - Search box icon replaced with a crisper real SVG magnifying
-         glass, in a cleaner pill-shaped search field.
-       - Search already matches both Order ID (short or full UUID)
-         and Customer Name — kept and confirmed working.
-
-     (all earlier features unchanged: order_number human-readable ID,
-     live filter counts, out_for_delivery status/flow, real
-     shipped/out_for_delivery/delivered timestamps shown per card,
-     customer email shown, admin cancel with Yes/No confirm +
-     cancelled_by tracking, real-time clock, loader + toasts)
+       - "Cancel Order" button no longer uses the plain browser
+         confirm() popup. It now opens a proper modal (same idea as
+         the customer-side cancel modal) with a Cancel Reason
+         dropdown + "Other" free-text box. A reason is REQUIRED —
+         the admin cannot submit the cancellation without picking
+         or typing one. On submit, the order is set to 'cancelled'
+         with cancel_reason, cancelled_by: 'admin', and cancelled_at
+         (real timestamp) saved — same fields the customer-side "See
+         All Updates" popup reads, so it shows up there instantly via
+         realtime.
+       - Everything else unchanged: PDF/Invoice icon on Shipped/Out
+         for Delivery/Delivered, search by Order ID or Customer Name,
+         live filter counts, out_for_delivery flow, real timestamps
+         per card, customer email shown, real-time clock, loader +
+         toasts, 2-hour auto session logout.
 
      Requires (run once in Supabase SQL editor, if not already done):
        alter table orders add column if not exists user_email text;
@@ -26,6 +27,7 @@
        alter table orders add column if not exists out_for_delivery_at timestamptz;
        alter table orders add column if not exists delivered_at timestamptz;
        alter table orders add column if not exists cancelled_at timestamptz;
+       alter table orders add column if not exists cancel_reason text;
 
        -- for the human-readable Order ID (ORD-TRI4648AA style):
        alter table orders add column if not exists order_number text unique;
@@ -146,6 +148,30 @@
     <div id="adOrdersList" class="adorderslist"></div>
   </div>
 
+</div>
+
+<!-- ===== ADMIN CANCEL ORDER MODAL (reason dropdown + "Other" textbox) ===== -->
+<div class="admodal-overlay" id="adCancelModal">
+  <div class="admodal-box">
+    <h3>Cancel Order</h3>
+    <p class="admodal-sub">Please select or type a reason for cancelling this order</p>
+    <label class="admodal-label">Cancel Reason</label>
+    <select class="admodal-input" id="adCancelReason" onchange="adToggleOtherReason()">
+      <option value="">Select a reason</option>
+      <option value="Out of stock">Out of stock</option>
+      <option value="Customer requested">Customer requested</option>
+      <option value="Address / area not serviceable">Address / area not serviceable</option>
+      <option value="Payment issue">Payment issue</option>
+      <option value="Duplicate order">Duplicate order</option>
+      <option value="Other">Other</option>
+    </select>
+    <textarea class="admodal-input" id="adCancelOtherText" placeholder="Please type the reason" style="display:none;margin-top:8px;min-height:60px;resize:vertical;"></textarea>
+    <p class="admodal-err" id="adCancelReasonMsg" style="display:none;">Please select or type a reason.</p>
+    <div class="admodal-actions">
+      <button class="admodal-btn admodal-no" type="button" onclick="adCloseAdminCancelModal()">Back</button>
+      <button class="admodal-btn admodal-yes" type="button" onclick="adSubmitAdminCancel()">Submit Cancellation</button>
+    </div>
+  </div>
 </div>
 
 <style>
@@ -298,6 +324,21 @@
   .adtoast.show{ top:18px; }
   .adtoast.error{ background:#e11d48; }
 
+  /* ===== Admin Cancel Order modal (reason required) ===== */
+  .admodal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999999;display:none;align-items:center;justify-content:center;padding:20px;}
+  .admodal-overlay.active{display:flex;}
+  .admodal-box{background:#fff;border-radius:16px;padding:26px 24px;max-width:360px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.2);text-align:left;}
+  .admodal-box h3{margin:0 0 4px;font-size:16.5px;color:#1e2430;text-align:center;}
+  .admodal-sub{text-align:center;font-size:12.5px;color:#767e8c;margin:0 0 16px;}
+  .admodal-label{display:block;font-size:12.5px;font-weight:700;color:#1e2430;margin-bottom:6px;}
+  .admodal-input{width:100%;padding:10px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13.5px;outline:none;font-family:inherit;}
+  .admodal-input:focus{border-color:#0f766e;}
+  .admodal-err{font-size:13px;color:#e11d48;margin-top:8px;}
+  .admodal-actions{display:flex;gap:12px;margin-top:20px;}
+  .admodal-btn{flex:1;padding:11px;border-radius:8px;font-weight:700;font-size:14px;border:none;cursor:pointer;}
+  .admodal-no{background:#f1f3f6;color:#333;}
+  .admodal-yes{background:#e11d48;color:#fff;}
+
   /* Light desktop polish — cards a bit wider / grid on large screens */
   @media(min-width:1000px){
     .addash{padding:24px 32px;}
@@ -335,6 +376,8 @@
 
   var allOrders = [];
   var currentFilter = 'all';
+  // id of the order currently targeted by the Cancel Order modal
+  var adCancelTargetId = null;
 
   // real SVG "document + download arrow" icon used for the
   // Invoice PDF button (replaces the old 📄 emoji everywhere)
@@ -686,12 +729,12 @@
           + '<button class="adactionbtn reject" onclick="adRejectCancel(\'' + order.id + '\')">Reject (Keep Order)</button>';
       } else if(order.status === 'placed'){
         actionsHtml = '<button class="adactionbtn ship" onclick="adMarkStatus(\'' + order.id + '\',\'shipped\')">Mark Shipped</button>'
-          + '<button class="adactionbtn cancel" onclick="adAdminCancelOrder(\'' + order.id + '\')">Cancel Order</button>';
+          + '<button class="adactionbtn cancel" onclick="adOpenAdminCancelModal(\'' + order.id + '\')">Cancel Order</button>';
       } else if(order.status === 'shipped'){
         // shipped orders now move to "Out for Delivery" first,
         // not straight to Delivered. Cancel still allowed here.
         actionsHtml = '<button class="adactionbtn outfordelivery" onclick="adMarkStatus(\'' + order.id + '\',\'out_for_delivery\')">Mark Out for Delivery</button>'
-          + '<button class="adactionbtn cancel" onclick="adAdminCancelOrder(\'' + order.id + '\')">Cancel Order</button>';
+          + '<button class="adactionbtn cancel" onclick="adOpenAdminCancelModal(\'' + order.id + '\')">Cancel Order</button>';
       } else if(order.status === 'out_for_delivery'){
         // final step before Delivered. No cancel here — the order
         // is already with the delivery agent.
@@ -764,15 +807,72 @@
     adShowToast('Cancellation Rejected', false);
   };
 
+  // ===== ADMIN CANCEL ORDER MODAL (reason required) =====
+  window.adOpenAdminCancelModal = function(orderId){
+    adCancelTargetId = orderId;
+    document.getElementById('adCancelReason').value = '';
+    document.getElementById('adCancelOtherText').value = '';
+    document.getElementById('adCancelOtherText').style.display = 'none';
+    document.getElementById('adCancelReasonMsg').style.display = 'none';
+    document.getElementById('adCancelModal').classList.add('active');
+  };
+
+  window.adCloseAdminCancelModal = function(){
+    document.getElementById('adCancelModal').classList.remove('active');
+    adCancelTargetId = null;
+  };
+
+  // Show/hide the manual "type your reason" box when "Other" is picked
+  window.adToggleOtherReason = function(){
+    var reason = document.getElementById('adCancelReason').value;
+    var box = document.getElementById('adCancelOtherText');
+    box.style.display = (reason === 'Other') ? 'block' : 'none';
+    if(reason !== 'Other') box.value = '';
+    document.getElementById('adCancelReasonMsg').style.display = 'none';
+  };
+
   // Direct admin cancel — available while order is "placed" or "shipped".
-  // Shows a Yes/No confirm popup first; only proceeds if the admin confirms.
-  window.adAdminCancelOrder = async function(orderId){
-    if(!confirm('Kya aap sach me is order ko cancel karna chahte hain? Yeh undo nahi ho sakta.')) return;
+  // Requires a reason (picked from the dropdown, or typed under "Other")
+  // before it will actually cancel the order.
+  window.adSubmitAdminCancel = async function(){
+    var orderId = adCancelTargetId;
+    if(!orderId) return;
+
+    var reasonEl = document.getElementById('adCancelReason');
+    var reason = reasonEl ? reasonEl.value : '';
+    var msgEl = document.getElementById('adCancelReasonMsg');
+
+    if(reason === 'Other'){
+      var otherText = document.getElementById('adCancelOtherText').value.trim();
+      if(!otherText){
+        msgEl.textContent = 'Please type the reason.';
+        msgEl.style.display = 'block';
+        return;
+      }
+      reason = otherText;
+    }
+
+    if(!reason){
+      msgEl.textContent = 'Please select or type a reason.';
+      msgEl.style.display = 'block';
+      return;
+    }
+
+    document.getElementById('adCancelModal').classList.remove('active');
     adShowLoader();
+
     var res = await sb.from('orders')
-      .update({ status: 'cancelled', cancelled_by: 'admin', cancelled_at: new Date().toISOString() })
+      .update({
+        status: 'cancelled',
+        cancelled_by: 'admin',
+        cancelled_at: new Date().toISOString(),
+        cancel_reason: reason
+      })
       .eq('id', orderId)
       .select();
+
+    adCancelTargetId = null;
+
     if(!res.data || !res.data.length){
       adHideLoader();
       adShowToast('Order cancel nahi ho paaya.', true);
