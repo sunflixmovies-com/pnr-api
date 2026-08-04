@@ -191,6 +191,9 @@
   /* "Delivered, 3 Aug, 6:42 PM" tag next to the badge (desktop);
      wraps to its own line on mobile — see media query below. */
   .adbadgewrap{display:flex;flex-direction:column;align-items:flex-end;gap:4px;}
+  .adbadgerow{display:flex;align-items:center;gap:8px;}
+  .adpdficon{cursor:pointer;font-size:17px;line-height:1;user-select:none;}
+  .adpdficon:hover{opacity:.7;}
   .addeliveredtag{font-size:11.5px;color:#0f766e;font-weight:700;text-align:right;}
   .adcancelledtag{font-size:11.5px;color:#e11d48;font-weight:700;text-align:right;}
   .adshippedtag{font-size:11.5px;color:#2874f0;font-weight:700;text-align:right;}
@@ -292,6 +295,7 @@
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 (function(){
   var SUPABASE_URL = 'https://cblfmqcszdungpkbfrof.supabase.co';
@@ -588,9 +592,11 @@
       }
 
       var shippedTag = '';
+      var pdfIconHtml = '';
       if(order.status === 'shipped'){
         var sDate = order.shipped_at || order.updated_at || order.created_at;
         shippedTag = '<span class="adshippedtag">Shipped, ' + fmtDateShortTime(sDate) + '</span>';
+        pdfIconHtml = '<span class="adpdficon" title="Download Invoice PDF" onclick="adDownloadShippedInvoice(\'' + order.id + '\')">📄</span>';
       }
 
       var outForDeliveryTag = '';
@@ -635,7 +641,7 @@
       html += '<div class="adordercard">'
         + '<div class="adordertop">'
         + '<div><div class="adorderid">Order ID: #' + displayOrderId(order) + '<span class="adorderidfull"> (' + order.id + ')</span></div><div class="adorderdate">' + fmtDateTime(order.created_at) + '</div></div>'
-        + '<div class="adbadgewrap"><span class="adbadge ' + order.status + '">' + order.status.replace('_',' ') + '</span>' + shippedTag + outForDeliveryTag + deliveredTag + cancelledTag + '</div>'
+        + '<div class="adbadgewrap"><div class="adbadgerow">' + pdfIconHtml + '<span class="adbadge ' + order.status + '">' + order.status.replace('_',' ') + '</span></div>' + shippedTag + outForDeliveryTag + deliveredTag + cancelledTag + '</div>'
         + '</div>'
         + (order.cancel_reason ? '<div class="adreasonline">Reason: <b>' + escapeHtml(order.cancel_reason) + '</b></div>' : '')
         + '<div class="aditemsrow">' + thumbs + '</div>'
@@ -763,6 +769,145 @@
       input.style.borderColor = '#1a7f37';
       setTimeout(function(){ input.style.borderColor = '#e0e0e0'; }, 1200);
     }
+  };
+
+  // ===== SHIPPED INVOICE (real downloadable PDF) =====
+  // Fill these in with your real business contact/GST details if you
+  // have them — left blank by default so nothing false ever prints on
+  // the invoice. Billing Address is intentionally left blank per request.
+  var TRIKUND_CONTACT_PHONE = '';
+  var TRIKUND_CONTACT_EMAIL = '';
+  var TRIKUND_GSTIN = '';
+
+  function adMoneyPlain(n){ return Math.round(n || 0).toLocaleString('en-IN'); }
+
+  window.adDownloadShippedInvoice = function(orderId){
+    var order = allOrders.find(function(o){ return o.id === orderId; });
+    if(!order) return;
+    if(!window.jspdf || !window.jspdf.jsPDF){
+      adShowToast('PDF library still loading, try again in a moment.', true);
+      return;
+    }
+
+    var jsPDF = window.jspdf.jsPDF;
+    var doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    var pageWidth = doc.internal.pageSize.getWidth();
+    var margin = 40;
+    var shortId = displayOrderId(order);
+    var y = 50;
+
+    // Header
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.text('Trikund Printers', margin, y);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    var contactLine = [
+      TRIKUND_CONTACT_PHONE ? 'Contact us: ' + TRIKUND_CONTACT_PHONE : '',
+      TRIKUND_CONTACT_EMAIL
+    ].filter(Boolean).join('  ||  ');
+    if(contactLine){
+      doc.text(contactLine, pageWidth - margin, y - 14, { align: 'right' });
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Tax Invoice # ' + shortId, pageWidth - margin, y, { align: 'right' });
+
+    y += 16;
+    doc.setDrawColor(210);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 26;
+
+    // Order meta
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Order ID: #' + shortId, margin, y);
+    y += 16;
+    doc.setFont('helvetica', 'normal');
+    doc.text('Order Date: ' + new Date(order.created_at).toLocaleDateString('en-IN'), margin, y);
+    y += 16;
+    var invDate = order.shipped_at ? new Date(order.shipped_at) : new Date();
+    doc.text('Invoice Date: ' + invDate.toLocaleDateString('en-IN'), margin, y);
+    if(TRIKUND_GSTIN){
+      y += 16;
+      doc.text('GSTIN: ' + TRIKUND_GSTIN, margin, y);
+    }
+
+    // Billing (left, intentionally blank) / Shipping (right, filled)
+    var colY = y + 30;
+    var col1X = margin, col2X = pageWidth / 2 + 10;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Billing Address', col1X, colY);
+    doc.text('Shipping Address', col2X, colY);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    var addr = order.address || {};
+    var shipLines = [
+      addr.name || '',
+      addr.house || '',
+      addr.road || '',
+      [addr.city, addr.state, addr.pincode].filter(Boolean).join(', '),
+      addr.phone ? 'Phone: ' + addr.phone : ''
+    ].filter(Boolean);
+    var sy = colY + 16;
+    shipLines.forEach(function(line){
+      doc.text(line, col2X, sy);
+      sy += 13;
+    });
+
+    y = Math.max(colY + 16, sy) + 24;
+
+    // Items table (drawn manually — no extra plugin needed)
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text('Title', margin, y);
+    doc.text('Qty', pageWidth - margin - 170, y);
+    doc.text('Price (Rs)', pageWidth - margin - 120, y);
+    doc.text('Total (Rs)', pageWidth - margin, y, { align: 'right' });
+    y += 6;
+    doc.setDrawColor(0);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 16;
+
+    doc.setFont('helvetica', 'normal');
+    var items = order.items || [];
+    var itemsSubtotal = 0;
+    items.forEach(function(it){
+      var lineTotal = (it.price || 0) * (it.qty || 1);
+      itemsSubtotal += lineTotal;
+      var titleLines = doc.splitTextToSize(it.title || '', pageWidth - margin * 2 - 210);
+      doc.text(titleLines, margin, y);
+      doc.text(String(it.qty || 1), pageWidth - margin - 170, y);
+      doc.text(adMoneyPlain(it.price), pageWidth - margin - 120, y);
+      doc.text(adMoneyPlain(lineTotal), pageWidth - margin, y, { align: 'right' });
+      y += 14 * Math.max(titleLines.length, 1);
+    });
+
+    y += 8;
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 20;
+
+    var fee = Math.max((order.total_amount || 0) - itemsSubtotal, 0);
+    doc.setFontSize(9.5);
+    doc.text('Items Total', pageWidth - margin - 150, y);
+    doc.text('Rs ' + adMoneyPlain(itemsSubtotal), pageWidth - margin, y, { align: 'right' });
+    y += 16;
+    doc.text('Fees', pageWidth - margin - 150, y);
+    doc.text('Rs ' + adMoneyPlain(fee), pageWidth - margin, y, { align: 'right' });
+    y += 22;
+
+    doc.setDrawColor(210);
+    doc.line(pageWidth - margin - 190, y - 14, pageWidth - margin, y - 14);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text('Grand Total', pageWidth - margin - 150, y);
+    doc.text('Rs ' + adMoneyPlain(order.total_amount), pageWidth - margin, y, { align: 'right' });
+
+    doc.save('Invoice-' + shortId + '.pdf');
   };
 
 })();
