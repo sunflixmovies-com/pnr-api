@@ -9,6 +9,9 @@
          of a random fragment of the UUID. Falls back to the old
          UUID-fragment style automatically for any older order that
          doesn't have an order_number yet, so nothing breaks.
+       - NEW: filter buttons (All, Placed, Cancel Requests, Shipped, Out
+         for Delivery, Delivered, Cancelled) now show a live count next
+         to each label, e.g. "All (12)", "Placed (6)".
 
      (all earlier features unchanged: out_for_delivery status/flow,
      real shipped/out_for_delivery/delivered timestamps shown per card,
@@ -167,7 +170,7 @@
   .adlogoutbtn:hover{background:#fdecea;border-color:#e11d48;color:#e11d48;}
 
   .adfilterbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;align-items:center;}
-  .adfilterbtn{background:#fff;border:1.5px solid #e0e0e0;padding:8px 14px;border-radius:20px;font-size:12.5px;font-weight:700;cursor:pointer;color:#555;}
+  .adfilterbtn{background:#fff;border:1.5px solid #e0e0e0;padding:8px 14px;border-radius:20px;font-size:12.5px;font-weight:700;cursor:pointer;color:#555;font-variant-numeric:tabular-nums;}
   .adfilterbtn.active{background:#0f766e;color:#fff;border-color:#0f766e;}
   .adrefreshbtn{margin-left:auto;background:#fff;border:1.5px solid #e0e0e0;padding:8px 14px;border-radius:20px;font-size:12.5px;font-weight:700;cursor:pointer;color:#555;}
 
@@ -215,6 +218,7 @@
   .adactionbtn.confirm{background:#e11d48;color:#fff;}
   .adactionbtn.reject{background:#f1f3f6;color:#333;}
   .adactionbtn.ship{background:#2874f0;color:#fff;}
+.adactionbtn.outfordelivery{background:#9333ea;color:#fff;}
   .adactionbtn.deliver{background:#0f766e;color:#fff;}
   /* Cancel Order button (shown next to Mark Shipped / Mark Out for Delivery) */
   .adactionbtn.cancel{background:#e11d48;color:#fff;}
@@ -296,6 +300,29 @@
 
   var allOrders = [];
   var currentFilter = 'all';
+
+  // base labels + live counts for the filter bar buttons
+  var adFilterLabels = {
+    all: 'All',
+    placed: 'Placed',
+    cancel_requested: 'Cancel Requests',
+    shipped: 'Shipped',
+    out_for_delivery: 'Out for Delivery',
+    delivered: 'Delivered',
+    cancelled: 'Cancelled'
+  };
+  function adUpdateFilterCounts(){
+    var counts = { all: allOrders.length, placed:0, cancel_requested:0, shipped:0, out_for_delivery:0, delivered:0, cancelled:0 };
+    allOrders.forEach(function(o){
+      if(counts.hasOwnProperty(o.status)) counts[o.status]++;
+    });
+    document.querySelectorAll('.adfilterbtn[data-filter]').forEach(function(btn){
+      var f = btn.getAttribute('data-filter');
+      var label = adFilterLabels[f] || f;
+      var count = counts.hasOwnProperty(f) ? counts[f] : 0;
+      btn.textContent = label + ' (' + count + ')';
+    });
+  }
 
   function money(n){ return '₹' + Math.round(n || 0).toLocaleString('en-IN'); }
   function fmtDateTime(d){
@@ -487,6 +514,7 @@
         return;
       }
       allOrders = res.data || [];
+      adUpdateFilterCounts();
       renderOrders();
     } catch(err){
       list.innerHTML = '<div class="adempty">Error loading orders: ' + escapeHtml(err.message) + '</div>';
@@ -562,12 +590,12 @@
         actionsHtml = '<button class="adactionbtn ship" onclick="adMarkStatus(\'' + order.id + '\',\'shipped\')">Mark Shipped</button>'
           + '<button class="adactionbtn cancel" onclick="adAdminCancelOrder(\'' + order.id + '\')">Cancel Order</button>';
       } else if(order.status === 'shipped'){
-        // NEW: shipped orders now move to "Out for Delivery" first,
+        // shipped orders now move to "Out for Delivery" first,
         // not straight to Delivered. Cancel still allowed here.
-        actionsHtml = '<button class="adactionbtn ship" onclick="adMarkStatus(\'' + order.id + '\',\'out_for_delivery\')">Mark Out for Delivery</button>'
+       actionsHtml = '<button class="adactionbtn outfordelivery" onclick="adMarkStatus(\'' + order.id + '\',\'out_for_delivery\')">Mark Out for Delivery</button>'
           + '<button class="adactionbtn cancel" onclick="adAdminCancelOrder(\'' + order.id + '\')">Cancel Order</button>';
       } else if(order.status === 'out_for_delivery'){
-        // NEW: final step before Delivered. No cancel here — the order
+        // final step before Delivered. No cancel here — the order
         // is already with the delivery agent.
         actionsHtml = '<button class="adactionbtn deliver" onclick="adMarkStatus(\'' + order.id + '\',\'delivered\')">Mark Delivered</button>';
       } else if(order.status === 'cancelled'){
