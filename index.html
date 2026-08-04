@@ -218,6 +218,7 @@
   .adactionbtn.confirm{background:#e11d48;color:#fff;}
   .adactionbtn.reject{background:#f1f3f6;color:#333;}
   .adactionbtn.ship{background:#2874f0;color:#fff;}
+  .adactionbtn.outfordelivery{background:#9333ea;color:#fff;}
   .adactionbtn.deliver{background:#0f766e;color:#fff;}
   /* Cancel Order button (shown next to Mark Shipped / Mark Out for Delivery) */
   .adactionbtn.cancel{background:#e11d48;color:#fff;}
@@ -618,7 +619,7 @@
       } else if(order.status === 'shipped'){
         // shipped orders now move to "Out for Delivery" first,
         // not straight to Delivered. Cancel still allowed here.
-        actionsHtml = '<button class="adactionbtn ship" onclick="adMarkStatus(\'' + order.id + '\',\'out_for_delivery\')">Mark Out for Delivery</button>'
+        actionsHtml = '<button class="adactionbtn outfordelivery" onclick="adMarkStatus(\'' + order.id + '\',\'out_for_delivery\')">Mark Out for Delivery</button>'
           + '<button class="adactionbtn cancel" onclick="adAdminCancelOrder(\'' + order.id + '\')">Cancel Order</button>';
       } else if(order.status === 'out_for_delivery'){
         // final step before Delivered. No cancel here — the order
