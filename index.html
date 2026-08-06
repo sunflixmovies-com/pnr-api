@@ -110,6 +110,7 @@
         <button class="adinboxbtn" onclick="adOpenInbox()" type="button" title="Chat Inbox">
           📥 Inbox<span id="adInboxCount" class="adinboxcount" style="display:none;">0</span>
         </button>
+           <button class="adcomposebtn" onclick="adOpenCompose()" type="button" title="Send Notification">+</button>
         <span id="adLiveClock" class="adliveclock"></span>
         <span id="adAdminEmail"></span>
         <button class="adlogoutbtn" onclick="adDoLogout()" type="button">Logout</button>
@@ -215,7 +216,34 @@
     <div class="adinboxlist" id="adInboxList"></div>
   </div>
 </div>
+<!-- ===== NEW: ADMIN COMPOSE / SEND NOTIFICATION MODAL ===== -->
+<div class="admodal-overlay" id="adComposeModal">
+  <div class="admodal-box adcomposebox">
+    <div class="adcomposehead">
+      <h3>Send Notification</h3>
+      <button class="adchatclose" type="button" onclick="adCloseCompose()">✕</button>
+    </div>
+    <div class="adcomposebody">
+      <label>Message</label>
+      <textarea id="adComposeMsg" placeholder="Type your message..."></textarea>
 
+      <label>Image URL (optional)</label>
+      <input type="text" id="adComposeImg" placeholder="https://..." oninput="adComposePreviewImg()">
+      <img id="adComposePreview" class="adcomposepreview">
+
+      <label>Send To</label>
+      <div class="adtargetrow">
+        <div class="adtargetopt active" id="adTargetAllBtn" onclick="adSetTarget('all')">All Customers</div>
+        <div class="adtargetopt" id="adTargetCustomBtn" onclick="adSetTarget('custom')">Custom (<span id="adTargetCustomCount">0</span> visible)</div>
+      </div>
+
+      <p class="adcomposeerr" id="adComposeErr"></p>
+    </div>
+    <div class="adcomposefoot">
+      <button class="adcomposesend" id="adComposeSendBtn" onclick="adSendBroadcast()" type="button">Send Notification</button>
+    </div>
+  </div>
+</div>
 <style>
   .adwrap *{box-sizing:border-box;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;}
 
@@ -443,7 +471,31 @@
   .admodal-btn{flex:1;padding:11px;border-radius:8px;font-weight:700;font-size:14px;border:none;cursor:pointer;}
   .admodal-no{background:#f1f3f6;color:#333;}
   .admodal-yes{background:#e11d48;color:#fff;}
+.adcomposebtn{
+  width:34px;height:34px;border-radius:50%;
+  background:#0f766e;color:#fff;border:none;
+  font-size:20px;font-weight:800;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  line-height:1;padding:0;
+}
+.adcomposebtn:hover{background:#0b5b54;}
 
+.adcomposebox{max-width:420px;width:100%;padding:0 !important;display:flex;flex-direction:column;max-height:85vh;}
+.adcomposehead{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #eef2f6;}
+.adcomposehead h3{margin:0;font-size:15.5px;}
+.adcomposebody{padding:16px;overflow-y:auto;}
+.adcomposebody textarea{width:100%;min-height:80px;padding:10px 12px;border:1.5px solid #e0e0e0;border-radius:9px;font-size:13.5px;font-family:inherit;resize:vertical;outline:none;margin-bottom:12px;}
+.adcomposebody textarea:focus{border-color:#0f766e;}
+.adcomposebody input[type="text"]{width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:9px;font-size:13px;outline:none;margin-bottom:12px;}
+.adcomposebody label{display:block;font-size:12.5px;font-weight:700;color:#1e2430;margin-bottom:6px;}
+.adtargetrow{display:flex;gap:10px;margin-bottom:14px;}
+.adtargetopt{flex:1;border:1.5px solid #e0e0e0;border-radius:10px;padding:10px;cursor:pointer;text-align:center;font-size:12.5px;font-weight:700;color:#555;}
+.adtargetopt.active{border-color:#0f766e;background:#e6f7f0;color:#0f766e;}
+.adcomposepreview{max-width:100%;max-height:120px;border-radius:8px;margin-bottom:12px;display:none;}
+.adcomposefoot{padding:12px 16px;border-top:1px solid #eef2f6;}
+.adcomposesend{width:100%;background:#0f766e;color:#fff;border:none;padding:11px;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;}
+.adcomposesend:disabled{opacity:.6;}
+.adcomposeerr{color:#e11d48;font-size:12.5px;margin-top:6px;display:none;}
   /* ===== NEW: masonry-style column layout on desktop instead of
      CSS grid — prevents a short card from stretching to match a
      taller neighbour in the same row (no more empty gaps). ===== */
@@ -1518,7 +1570,124 @@
 
     doc.save('Invoice-' + shortId + '.pdf');
   };
+// ===== NEW: COMPOSE / SEND NOTIFICATION =====
+  var adComposeTarget = 'all';
 
+  window.adOpenCompose = function(){
+    document.getElementById('adComposeMsg').value = '';
+    document.getElementById('adComposeImg').value = '';
+    document.getElementById('adComposePreview').style.display = 'none';
+    document.getElementById('adComposeErr').style.display = 'none';
+    adComposeTarget = 'all';
+    document.getElementById('adTargetAllBtn').classList.add('active');
+    document.getElementById('adTargetCustomBtn').classList.remove('active');
+
+    // currently visible (filtered/searched) orders -> unique customers
+    var visibleIds = document.querySelectorAll('.adordercard').length;
+    // filtered list is re-derivable from currentFilter+adSearchQuery same as renderOrders
+    var filtered = currentFilter === 'all' ? allOrders : allOrders.filter(function(o){ return o.status === currentFilter; });
+    if(adSearchQuery){
+      filtered = filtered.filter(function(o){
+        var addr = o.address || {};
+        var idMatch = displayOrderId(o).toLowerCase().indexOf(adSearchQuery) > -1 || (o.id||'').toLowerCase().indexOf(adSearchQuery) > -1;
+        var nameMatch = (addr.name||'').toLowerCase().indexOf(adSearchQuery) > -1;
+        return idMatch || nameMatch;
+      });
+    }
+    var uniqUsers = {};
+    filtered.forEach(function(o){ if(o.user_id) uniqUsers[o.user_id] = true; });
+    document.getElementById('adTargetCustomCount').textContent = Object.keys(uniqUsers).length;
+
+    document.getElementById('adComposeModal').classList.add('active');
+  };
+
+  window.adCloseCompose = function(){
+    document.getElementById('adComposeModal').classList.remove('active');
+  };
+
+  window.adSetTarget = function(t){
+    adComposeTarget = t;
+    document.getElementById('adTargetAllBtn').classList.toggle('active', t==='all');
+    document.getElementById('adTargetCustomBtn').classList.toggle('active', t==='custom');
+  };
+
+  window.adComposePreviewImg = function(){
+    var url = document.getElementById('adComposeImg').value.trim();
+    var img = document.getElementById('adComposePreview');
+    if(url){ img.src = url; img.style.display = 'block'; }
+    else { img.style.display = 'none'; }
+  };
+
+  window.adSendBroadcast = async function(){
+    var msg = document.getElementById('adComposeMsg').value.trim();
+    var imgUrl = document.getElementById('adComposeImg').value.trim();
+    var errEl = document.getElementById('adComposeErr');
+    if(!msg){
+      errEl.textContent = 'Please type a message.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    // figure out target user_ids
+    var targetUserIds = [];
+    if(adComposeTarget === 'all'){
+      var res = await sb.from('orders').select('user_id');
+      if(res.error){ errEl.textContent = res.error.message; errEl.style.display='block'; return; }
+      var seenAll = {};
+      (res.data||[]).forEach(function(r){ if(r.user_id && !seenAll[r.user_id]){ seenAll[r.user_id]=true; targetUserIds.push(r.user_id); } });
+    } else {
+      var filtered = currentFilter === 'all' ? allOrders : allOrders.filter(function(o){ return o.status === currentFilter; });
+      if(adSearchQuery){
+        filtered = filtered.filter(function(o){
+          var addr = o.address || {};
+          var idMatch = displayOrderId(o).toLowerCase().indexOf(adSearchQuery) > -1 || (o.id||'').toLowerCase().indexOf(adSearchQuery) > -1;
+          var nameMatch = (addr.name||'').toLowerCase().indexOf(adSearchQuery) > -1;
+          return idMatch || nameMatch;
+        });
+      }
+      var seenC = {};
+      filtered.forEach(function(o){ if(o.user_id && !seenC[o.user_id]){ seenC[o.user_id]=true; targetUserIds.push(o.user_id); } });
+    }
+
+    if(!targetUserIds.length){
+      errEl.textContent = 'No target customers found.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    document.getElementById('adComposeSendBtn').disabled = true;
+    document.getElementById('adComposeModal').classList.remove('active');
+    adShowLoader();
+
+    var bres = await sb.from('broadcasts').insert({
+      message: msg,
+      image_url: imgUrl || null,
+      target_type: adComposeTarget
+    }).select();
+
+    if(bres.error || !bres.data || !bres.data.length){
+      adHideLoader();
+      document.getElementById('adComposeSendBtn').disabled = false;
+      adShowToast('Could not send: ' + (bres.error ? bres.error.message : 'unknown error'), true);
+      return;
+    }
+
+    var broadcastId = bres.data[0].id;
+    var rows = targetUserIds.map(function(uid){
+      return { broadcast_id: broadcastId, user_id: uid, message: msg, image_url: imgUrl || null };
+    });
+
+    var nres = await sb.from('notifications').insert(rows);
+
+    adHideLoader();
+    document.getElementById('adComposeSendBtn').disabled = false;
+
+    if(nres.error){
+      adShowToast('Broadcast saved but sending failed: ' + nres.error.message, true);
+      return;
+    }
+    adShowToast('Notification sent to ' + targetUserIds.length + ' customer(s)', false);
+  };
 })();
 
 </script>
