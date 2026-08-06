@@ -4,35 +4,19 @@
      (final URL: /p/admin.html) — don't link this anywhere public.
 
      UPDATED (this version):
-       - "Cancel Order" button no longer uses the plain browser
-         confirm() popup. It now opens a proper modal (same idea as
-         the customer-side cancel modal) with a Cancel Reason
-         dropdown + "Other" free-text box. A reason is REQUIRED —
-         the admin cannot submit the cancellation without picking
-         or typing one. On submit, the order is set to 'cancelled'
-         with cancel_reason, cancelled_by: 'admin', and cancelled_at
-         (real timestamp) saved — same fields the customer-side "See
-         All Updates" popup reads, so it shows up there instantly via
-         realtime.
-       - NEW: granular tracking sub-steps with real timestamps.
-         * While PLACED: two "Mark Done" rows — "Seller has
-           processed your order" (processed_at) and "Picked up by
-           delivery partner" (picked_up_at). Second one is disabled
-           until the first is marked done.
-         * "Mark Shipped" now opens a small modal asking for Courier
-           Name + Tracking ID (e.g. "Ekart Logistics" /
-           "FMPP3941633523") before moving the order to 'shipped' —
-           saved as courier_name / courier_tracking_id + shipped_at.
-         * While SHIPPED: one "Mark Done" row — "Received in the hub
-           nearest to customer" (hub_received_at).
-         All of these are read live by the customer orders page's
-         "See All Updates" popup with real date & time, via the
-         existing realtime subscription.
-       - Everything else unchanged: PDF/Invoice icon on Shipped/Out
-         for Delivery/Delivered, search by Order ID or Customer Name,
-         live filter counts, out_for_delivery flow, real timestamps
-         per card, customer email shown, real-time clock, loader +
-         toasts, 2-hour auto session logout.
+       - NEW: CUSTOMER RATING VIEW. Delivered orders that have a
+         customer rating now show a golden "★ N · See Rating" badge
+         next to the status badge. Clicking it opens a popup showing
+         the stars (filled orange), the customer's written review (if
+         any), plus the order id + customer name. Reads the same
+         rating / review_text columns the customer orders page writes
+         — no new DB columns or policies needed (admin already reads
+         all order columns via select('*')).
+       - Everything else unchanged: cancel modal with reason,
+         granular tracking sub-steps, Mark Shipped modal with courier
+         details, PDF invoice icon, search, live filter counts,
+         out_for_delivery flow, real timestamps, customer email,
+         real-time clock, loader + toasts, 2-hour auto logout.
 
      Requires (run once in Supabase SQL editor, if not already done):
        alter table orders add column if not exists user_email text;
@@ -42,38 +26,18 @@
        alter table orders add column if not exists delivered_at timestamptz;
        alter table orders add column if not exists cancelled_at timestamptz;
        alter table orders add column if not exists cancel_reason text;
-
-       -- NEW columns for the granular tracking sub-steps:
        alter table orders add column if not exists processed_at timestamptz;
        alter table orders add column if not exists picked_up_at timestamptz;
        alter table orders add column if not exists courier_name text;
        alter table orders add column if not exists courier_tracking_id text;
        alter table orders add column if not exists hub_received_at timestamptz;
-
-       -- for the human-readable Order ID (ORD-TRI4648AA style):
        alter table orders add column if not exists order_number text unique;
 
-       create sequence if not exists order_seq start 1001; -- (not required
-       -- if you're using the random ORD-TRI generator function instead)
-
-     NOTE: if your "orders.status" column has a CHECK constraint that
-     restricts which text values are allowed, you must also add
-     'out_for_delivery' to that constraint's allowed list, e.g.:
-       alter table orders drop constraint if exists orders_status_check;
-       alter table orders add constraint orders_status_check
-         check (status in ('placed','cancel_requested','cancelled',
-                            'shipped','out_for_delivery','delivered'));
-     (If status is a plain text column with no constraint, you can
-     skip this — nothing extra needed.)
+       -- rating columns (already added if customer rating works):
+       alter table orders add column if not exists rating int;
+       alter table orders add column if not exists review_text text;
      ============================================================ -->
 
-<!-- ===== CRITICAL FIX: clears a leftover overlay flag from the main
-     theme that was causing this page to stay invisible forever, and
-     forces the page visible on EVERY screen size. The theme's own
-     fixed header + page-loader only un-hide themselves on mobile
-     (<=768px) — on laptop/desktop they were left covering the page,
-     which is why this looked blank only on laptop. Must run first,
-     before anything else. ===== -->
 <script>
   try { sessionStorage.removeItem('overlayOpen'); } catch(e){}
   document.documentElement.style.visibility = 'visible';
@@ -92,15 +56,11 @@
   setTimeout(adForceShow, 300);
   setTimeout(adForceShow, 1500);
 
-  // Safety stubs in case the site-wide theme script still tries to
-  // call these (they don't exist on this page) — prevents a crash.
   window.openCartDrawer = window.openCartDrawer || function(){};
   window.openAccountPageFull = window.openAccountPageFull || function(){};
   window.openCategoriesPage = window.openCategoriesPage || function(){};
 </script>
 
-<!-- Visible error banner: if any JS below fails, you'll SEE why
-     instead of a blank page. -->
 <div id="adFatalError" style="display:none;background:#fdecea;color:#b71c1c;padding:14px 18px;font:13.5px monospace;border-bottom:2px solid #e11d48;white-space:pre-wrap;"></div>
 <script>
   window.addEventListener('error', function(e){
@@ -114,12 +74,10 @@
 
 <div class="adwrap">
 
-  <!-- full-screen loader shown during any admin action (mark shipped/delivered, refresh, etc.) -->
   <div class="adloaderoverlay" id="adLoaderOverlay">
     <div class="adspinner"></div>
   </div>
 
-  <!-- toast notification (e.g. "Customer Order Shipped") -->
   <div class="adtoast" id="adToast"></div>
 
   <!-- LOGIN SCREEN -->
@@ -171,7 +129,7 @@
 
 </div>
 
-<!-- ===== ADMIN CANCEL ORDER MODAL (reason dropdown + "Other" textbox) ===== -->
+<!-- ===== ADMIN CANCEL ORDER MODAL ===== -->
 <div class="admodal-overlay" id="adCancelModal">
   <div class="admodal-box">
     <h3>Cancel Order</h3>
@@ -195,7 +153,7 @@
   </div>
 </div>
 
-<!-- ===== ADMIN MARK-SHIPPED MODAL (courier name + tracking id) ===== -->
+<!-- ===== ADMIN MARK-SHIPPED MODAL ===== -->
 <div class="admodal-overlay" id="adShippedModal">
   <div class="admodal-box">
     <h3>Mark as Shipped</h3>
@@ -208,6 +166,19 @@
     <div class="admodal-actions">
       <button class="admodal-btn admodal-no" type="button" onclick="adCloseShippedModal()">Back</button>
       <button class="admodal-btn admodal-yes" type="button" style="background:#2874f0;" onclick="adSubmitShipped()">Confirm Shipped</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== NEW: ADMIN RATING VIEW MODAL (opens from the ★ badge on delivered cards) ===== -->
+<div class="admodal-overlay" id="adRatingModal">
+  <div class="admodal-box">
+    <h3>Customer Rating</h3>
+    <p class="admodal-sub" id="adRatingOrderInfo"></p>
+    <div class="adratingstars" id="adRatingStars"></div>
+    <div class="adratingreview" id="adRatingReview"></div>
+    <div class="admodal-actions">
+      <button class="admodal-btn admodal-no" type="button" onclick="adCloseRatingModal()">Close</button>
     </div>
   </div>
 </div>
@@ -243,8 +214,6 @@
   .adfilterbtn.active{background:#0f766e;color:#fff;border-color:#0f766e;}
   .adrefreshbtn{margin-left:auto;background:#fff;border:1.5px solid #e0e0e0;padding:8px 14px;border-radius:20px;font-size:12.5px;font-weight:700;cursor:pointer;color:#555;}
 
-  /* ===== polished pill-shaped search box with a real SVG icon in a
-     soft circle, closer to the reference screenshot look ===== */
   .adsearchbox{position:relative;display:flex;align-items:center;background:#fff;border:1.5px solid #e0e0e0;border-radius:24px;padding:0;transition:border-color .15s,box-shadow .15s;}
   .adsearchbox:focus-within{border-color:#0f766e;box-shadow:0 0 0 3px rgba(15,118,110,.12);}
   .adsearchicon{position:absolute;left:12px;width:15px;height:15px;color:#8a939e;pointer-events:none;}
@@ -265,13 +234,9 @@
   .adbadge.out_for_delivery{background:#fdf4ff;color:#9333ea;}
   .adbadge.delivered{background:#eef7ff;color:#0f766e;}
 
-  /* "Delivered, 3 Aug, 6:42 PM" tag next to the badge (desktop);
-     wraps to its own line on mobile — see media query below. */
   .adbadgewrap{display:flex;flex-direction:column;align-items:flex-end;gap:4px;}
   .adbadgerow{display:flex;align-items:center;gap:8px;}
 
-  /* ===== real SVG "download invoice" icon button (replaces the old
-     📄 emoji), color-matched to whichever status it's shown on ===== */
   .adpdficon{
     cursor:pointer;
     display:inline-flex;align-items:center;justify-content:center;
@@ -287,6 +252,17 @@
   .adordercard .adbadgerow .adpdficon.pdf-out_for_delivery{background:#fdf4ff;color:#9333ea;}
   .adordercard .adbadgerow .adpdficon.pdf-delivered{background:#eef7ff;color:#0f766e;}
   .adordercard .adbadgerow .adpdficon.pdf-shipped{background:#eef3ff;color:#2874f0;}
+
+  /* ===== NEW: golden "★ N · See Rating" badge on delivered cards +
+     the rating popup's stars / review styles ===== */
+  .adratingbadge{display:inline-flex;align-items:center;gap:4px;background:#fff8e6;color:#b7791f;border:1.5px solid #f5d78e;padding:4px 10px;border-radius:20px;font-size:11.5px;font-weight:800;cursor:pointer;flex-shrink:0;transition:background .15s,transform .1s;white-space:nowrap;}
+  .adratingbadge:hover{background:#fdeec7;transform:translateY(-1px);}
+  .adratingbadge:active{transform:translateY(0);}
+  .adratingstars{text-align:center;font-size:30px;letter-spacing:6px;margin:6px 0 12px;}
+  .adratingstars .star{color:#d0d8e0;}
+  .adratingstars .star.filled{color:#f5a623;}
+  .adratingreview{font-size:13.5px;color:#334155;line-height:1.6;background:#f8fafc;border-radius:10px;padding:12px 14px;word-wrap:break-word;}
+  .adratingreview.empty{color:#94a3b8;text-align:center;font-style:italic;}
 
   .addeliveredtag{font-size:11.5px;color:#0f766e;font-weight:700;text-align:right;}
   .adcancelledtag{font-size:11.5px;color:#e11d48;font-weight:700;text-align:right;}
@@ -311,9 +287,6 @@
   .addeliveryrow input[type="date"]{padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:13px;}
   .addeliveryrow button{background:#0f766e;color:#fff;border:none;padding:7px 14px;border-radius:7px;font-size:12.5px;font-weight:700;cursor:pointer;}
 
-  /* ===== NEW: granular tracking sub-step rows shown inside the
-     Placed / Shipped cards ("Seller has processed your order",
-     "Picked up by delivery partner", "Received in hub", etc.) ===== */
   .adsubsteps{border:1px dashed #dbe3e7;border-radius:10px;padding:10px 12px;margin-bottom:12px;background:#fafcfc;}
   .adsubstep{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;font-size:12.5px;color:#333;}
   .adsubstep + .adsubstep{border-top:1px dashed #e7eaec;}
@@ -329,13 +302,11 @@
   .adactionbtn.ship{background:#2874f0;color:#fff;}
   .adactionbtn.outfordelivery{background:#9333ea;color:#fff;}
   .adactionbtn.deliver{background:#0f766e;color:#fff;}
-  /* Cancel Order button (shown next to Mark Shipped / Mark Out for Delivery) */
   .adactionbtn.cancel{background:#e11d48;color:#fff;}
   .adactionbtn:disabled{opacity:.5;cursor:default;}
 
   .adempty{text-align:center;padding:60px 20px;color:#767e8c;font-size:14px;}
 
-  /* full-screen loader overlay */
   .adloaderoverlay{
     display:none;
     position:fixed;top:0;left:0;right:0;bottom:0;
@@ -353,7 +324,6 @@
   }
   @keyframes adspin{ to{ transform:rotate(360deg); } }
 
-  /* toast notification */
   .adtoast{
     position:fixed;
     top:-80px;
@@ -373,7 +343,6 @@
   .adtoast.show{ top:18px; }
   .adtoast.error{ background:#e11d48; }
 
-  /* ===== Admin Cancel Order modal (reason required) / Mark Shipped modal ===== */
   .admodal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999999;display:none;align-items:center;justify-content:center;padding:20px;}
   .admodal-overlay.active{display:flex;}
   .admodal-box{background:#fff;border-radius:16px;padding:26px 24px;max-width:360px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.2);text-align:left;}
@@ -388,16 +357,11 @@
   .admodal-no{background:#f1f3f6;color:#333;}
   .admodal-yes{background:#e11d48;color:#fff;}
 
-  /* Light desktop polish — cards a bit wider / grid on large screens */
   @media(min-width:1000px){
     .addash{padding:24px 32px;}
     .adorderslist{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
   }
 
-  /* ===== neutralise the site-wide fixed header / cat-bar /
-     bottom-nav / page-loader on THIS page, on EVERY screen size.
-     The theme only hides these on mobile — on laptop they were
-     staying fixed on top (z-index 99999) and covering the page. ===== */
   body.ad-admin-page .site-header,
   body.ad-admin-page .cat-bar,
   body.ad-admin-page .bottom-nav,
@@ -425,16 +389,11 @@
 
   var allOrders = [];
   var currentFilter = 'all';
-  // id of the order currently targeted by the Cancel Order modal
   var adCancelTargetId = null;
-  // id of the order currently targeted by the Mark Shipped modal
   var adShippedTargetId = null;
 
-  // real SVG "document + download arrow" icon used for the
-  // Invoice PDF button (replaces the old 📄 emoji everywhere)
   var AD_PDF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="11" x2="12" y2="17"></line><polyline points="9 14 12 17 15 14"></polyline></svg>';
 
-  // base labels + live counts for the filter bar buttons
   var adFilterLabels = {
     all: 'All',
     placed: 'Placed',
@@ -468,7 +427,6 @@
     var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return dt.getDate() + ' ' + months[dt.getMonth()];
   }
-  // date + time like "3 Aug, 6:42 PM" used for the "Delivered, ..." tag
   function fmtDateShortTime(d){
     var dt = new Date(d);
     var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -486,14 +444,10 @@
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
     });
   }
-  // Human-readable Order ID: uses order.order_number if present
-  // (e.g. "ORD-TRI4648AA"), else falls back to the old UUID-fragment
-  // style for any legacy order created before order_number existed.
   function displayOrderId(order){
     return order.order_number || (order.id || '').split('-')[0].toUpperCase();
   }
 
-  // loader overlay controls
   function adShowLoader(){
     var ov = document.getElementById('adLoaderOverlay');
     if(ov) ov.classList.add('show');
@@ -503,7 +457,6 @@
     if(ov) ov.classList.remove('show');
   }
 
-  // toast notification controls
   var adToastTimer = null;
   function adShowToast(msg, isError){
     var t = document.getElementById('adToast');
@@ -557,7 +510,6 @@
     }
   }
 
-  // live real-time clock in the header, updates every second
   var adClockTimer = null;
   function adStartClock(){
     function tick(){
@@ -575,10 +527,6 @@
     adClockTimer = setInterval(tick, 1000);
   }
 
-  // NEW: auto-logout after 2 hours from login. The login time is stored
-  // in localStorage so it survives a page refresh — if the admin closes
-  // the tab and reopens it after the 2 hours are already up, they'll be
-  // logged out immediately instead of getting a fresh 2-hour window.
   var AD_SESSION_MS = 2 * 60 * 60 * 1000; // 2 hours
   var adSessionTimer = null;
   function adStartSessionTimer(){
@@ -689,8 +637,6 @@
     renderOrders();
   };
 
-  // real search — filters the currently visible list by Order ID
-  // (short display id or full UUID) or customer name, live as you type.
   var adSearchQuery = '';
   window.adOnSearchInput = function(){
     var input = document.getElementById('adSearchInput');
@@ -698,9 +644,6 @@
     renderOrders();
   };
 
-  // ===== NEW: sub-step row builder for the granular tracking rows
-  // shown inside Placed / Shipped cards ("Seller has processed your
-  // order", "Picked up by delivery partner", "Received in hub", etc.) =====
   function adSubstepRow(order, field, label, disabledReason){
     if(order[field]){
       return '<div class="adsubstep"><span class="adsubstepdone">✓ ' + escapeHtml(label) + ' — ' + fmtDateShortTime(order[field]) + '</span></div>';
@@ -761,9 +704,6 @@
       }).join('');
       var deliveryVal = toDateInputValue(order.delivery_date || new Date(new Date(order.created_at).getTime() + 5*24*60*60*1000));
 
-      // Real date+time tags shown next to the status badge — one shows
-      // depending on whichever status the order is CURRENTLY in (wraps
-      // to its own line on phone via the media query in <style>)
       var deliveredTag = '';
       if(order.status === 'delivered'){
         var dDate = order.delivered_at || order.updated_at || order.created_at;
@@ -786,16 +726,20 @@
         var crDate = order.cancel_requested_at || order.updated_at || order.created_at;
         cancelRequestedTag = '<span class="adcancelrequestedtag">Cancel Requested, ' + fmtDateShortTime(crDate) + '</span>';
       }
-      // Invoice PDF icon — now shown on Shipped, Out for Delivery AND
-      // Delivered (earlier it only appeared on Shipped). Color of the
-      // icon button matches whichever status it's on.
       var pdfIconHtml = '';
       if(order.status === 'shipped' || order.status === 'out_for_delivery' || order.status === 'delivered'){
         var pdfColorClass = 'pdf-' + order.status;
         pdfIconHtml = '<span class="adpdficon ' + pdfColorClass + '" title="Download Invoice PDF" onclick="adDownloadShippedInvoice(\'' + order.id + '\')">' + AD_PDF_SVG + '</span>';
       }
 
-      // "Cancelled by you" / "Cancelled by Customer" tag below the CANCELLED badge, with real date+time
+      // ===== NEW: golden "★ N · See Rating" badge — shown only on
+      // delivered orders where the customer has left a rating.
+      // Clicking it opens the rating popup (adRatingModal).
+      var ratingBadgeHtml = '';
+      if(order.status === 'delivered' && order.rating){
+        ratingBadgeHtml = '<span class="adratingbadge" title="See customer rating" onclick="adOpenRatingModal(\'' + order.id + '\')">★ ' + order.rating + ' · See Rating</span>';
+      }
+
       var cancelledTag = '';
       if(order.status === 'cancelled'){
         var cDate = order.cancelled_at || order.updated_at || order.created_at;
@@ -813,13 +757,9 @@
         actionsHtml = '<button class="adactionbtn ship" onclick="adOpenShippedModal(\'' + order.id + '\')">Mark Shipped</button>'
           + '<button class="adactionbtn cancel" onclick="adOpenAdminCancelModal(\'' + order.id + '\')">Cancel Order</button>';
       } else if(order.status === 'shipped'){
-        // shipped orders now move to "Out for Delivery" first,
-        // not straight to Delivered. Cancel still allowed here.
         actionsHtml = '<button class="adactionbtn outfordelivery" onclick="adMarkStatus(\'' + order.id + '\',\'out_for_delivery\')">Mark Out for Delivery</button>'
           + '<button class="adactionbtn cancel" onclick="adOpenAdminCancelModal(\'' + order.id + '\')">Cancel Order</button>';
       } else if(order.status === 'out_for_delivery'){
-        // final step before Delivered. No cancel here — the order
-        // is already with the delivery agent.
         actionsHtml = '<button class="adactionbtn deliver" onclick="adMarkStatus(\'' + order.id + '\',\'delivered\')">Mark Delivered</button>';
       } else if(order.status === 'cancelled'){
         var byText = order.cancelled_by === 'admin' ? '(by you)' : '(by Customer)';
@@ -831,7 +771,7 @@
       html += '<div class="adordercard">'
         + '<div class="adordertop">'
         + '<div><div class="adorderid">Order ID: #' + displayOrderId(order) + '<span class="adorderidfull"> (' + order.id + ')</span></div><div class="adorderdate">' + fmtDateTime(order.created_at) + '</div></div>'
-        + '<div class="adbadgewrap"><div class="adbadgerow">' + pdfIconHtml + '<span class="adbadge ' + order.status + '">' + order.status.replace('_',' ') + '</span></div>' + shippedTag + outForDeliveryTag + deliveredTag + cancelledTag + cancelRequestedTag + '</div>'
+        + '<div class="adbadgewrap"><div class="adbadgerow">' + ratingBadgeHtml + pdfIconHtml + '<span class="adbadge ' + order.status + '">' + order.status.replace('_',' ') + '</span></div>' + shippedTag + outForDeliveryTag + deliveredTag + cancelledTag + cancelRequestedTag + '</div>'
         + '</div>'
         + (order.cancel_reason ? '<div class="adreasonline">Reason: <b>' + escapeHtml(order.cancel_reason) + '</b></div>' : '')
         + '<div class="aditemsrow">' + thumbs + '</div>'
@@ -852,6 +792,34 @@
     });
     list.innerHTML = html;
   }
+
+  // ===== NEW: RATING VIEW POPUP =====
+  // Opens from the golden "★ N · See Rating" badge on delivered cards.
+  window.adOpenRatingModal = function(orderId){
+    var order = allOrders.find(function(o){ return o.id === orderId; });
+    if(!order || !order.rating) return;
+    var addr = order.address || {};
+    document.getElementById('adRatingOrderInfo').textContent =
+      'Order #' + displayOrderId(order) + (addr.name ? ' · ' + addr.name : '');
+    var starsHtml = '';
+    for(var i = 1; i <= 5; i++){
+      starsHtml += '<span class="star' + (i <= order.rating ? ' filled' : '') + '">★</span>';
+    }
+    document.getElementById('adRatingStars').innerHTML = starsHtml;
+    var reviewEl = document.getElementById('adRatingReview');
+    if(order.review_text){
+      reviewEl.className = 'adratingreview';
+      reviewEl.textContent = order.review_text;
+    } else {
+      reviewEl.className = 'adratingreview empty';
+      reviewEl.textContent = 'No written review — rating only.';
+    }
+    document.getElementById('adRatingModal').classList.add('active');
+  };
+
+  window.adCloseRatingModal = function(){
+    document.getElementById('adRatingModal').classList.remove('active');
+  };
 
   // ===== ACTIONS =====
   window.adConfirmCancel = async function(orderId){
@@ -890,8 +858,6 @@
     adShowToast('Cancellation Rejected', false);
   };
 
-  // ===== NEW: mark a granular tracking sub-step done (processed_at /
-  // picked_up_at / hub_received_at) with a real timestamp =====
   window.adMarkSubstep = async function(orderId, field, label){
     adShowLoader();
     var updateObj = {};
@@ -914,7 +880,6 @@
     adShowToast(label + ' — marked done', false);
   };
 
-  // ===== NEW: Mark Shipped modal (courier name + tracking id required) =====
   window.adOpenShippedModal = function(orderId){
     adShippedTargetId = orderId;
     document.getElementById('adCourierName').value = '';
@@ -966,7 +931,7 @@
     adShowToast('Customer Order Shipped', false);
   };
 
-  // ===== ADMIN CANCEL ORDER MODAL (reason required) =====
+  // ===== ADMIN CANCEL ORDER MODAL =====
   window.adOpenAdminCancelModal = function(orderId){
     adCancelTargetId = orderId;
     document.getElementById('adCancelReason').value = '';
@@ -981,7 +946,6 @@
     adCancelTargetId = null;
   };
 
-  // Show/hide the manual "type your reason" box when "Other" is picked
   window.adToggleOtherReason = function(){
     var reason = document.getElementById('adCancelReason').value;
     var box = document.getElementById('adCancelOtherText');
@@ -990,9 +954,6 @@
     document.getElementById('adCancelReasonMsg').style.display = 'none';
   };
 
-  // Direct admin cancel — available while order is "placed" or "shipped".
-  // Requires a reason (picked from the dropdown, or typed under "Other")
-  // before it will actually cancel the order.
   window.adSubmitAdminCancel = async function(){
     var orderId = adCancelTargetId;
     if(!orderId) return;
@@ -1044,9 +1005,6 @@
 
   window.adMarkStatus = async function(orderId, newStatus){
     adShowLoader();
-    // Stamp the real moment this status was set, so both this admin
-    // page and the customer orders page can show the actual date/time
-    // instead of a guessed one.
     var updateObj = { status: newStatus };
     if(newStatus === 'shipped'){
       updateObj.shipped_at = new Date().toISOString();
@@ -1096,9 +1054,6 @@
   };
 
   // ===== INVOICE (real downloadable PDF) =====
-  // Fill these in with your real business contact/GST details if you
-  // have them — left blank by default so nothing false ever prints on
-  // the invoice. Billing Address is intentionally left blank per request.
   var TRIKUND_CONTACT_PHONE = '';
   var TRIKUND_CONTACT_EMAIL = '';
   var TRIKUND_GSTIN = '';
@@ -1120,7 +1075,6 @@
     var shortId = displayOrderId(order);
     var y = 50;
 
-    // Header
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(18);
     doc.text('Trikund Printers', margin, y);
@@ -1144,7 +1098,6 @@
     doc.line(margin, y, pageWidth - margin, y);
     y += 26;
 
-    // Order meta
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
     doc.text('Order ID: #' + shortId, margin, y);
@@ -1159,7 +1112,6 @@
       doc.text('GSTIN: ' + TRIKUND_GSTIN, margin, y);
     }
 
-    // Billing (left, intentionally blank) / Shipping (right, filled)
     var colY = y + 30;
     var col1X = margin, col2X = pageWidth / 2 + 10;
     doc.setFont('helvetica', 'bold');
@@ -1185,7 +1137,6 @@
 
     y = Math.max(colY + 16, sy) + 24;
 
-    // Items table (drawn manually — no extra plugin needed)
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.text('Title', margin, y);
