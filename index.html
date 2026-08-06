@@ -13,13 +13,32 @@
          and appear live on the customer side too. Opening the popup
          marks that order's unread messages read_by_admin=true and
          the dot disappears immediately.
-       - Rating badge ("★ N · See Rating") now sits at the BOTTOM
-         RIGHT of delivered cards, opposite "Order delivered." text.
+       - NEW: CHAT INBOX. A "📥 Inbox" button sits in the header with
+         a red unread-count badge. Clicking it opens a list of every
+         order that has a chat thread — customer name, order id, last
+         message preview, time, and an unread dot — sorted by most
+         recent message. Clicking a row opens that order's chat popup
+         directly.
+       - FIX: order cards now use a masonry-style column layout on
+         desktop (column-count instead of CSS grid) so a short card
+         no longer stretches to match a tall neighbour in the same
+         row, which used to leave a big empty gap under "Order
+         delivered." etc.
+       - Rating badge ("★ N · See Rating") sits at the BOTTOM RIGHT
+         of delivered cards, opposite "Order delivered." text.
        - Badge column stays right-aligned even when the row wraps.
 
      Requires (run once in Supabase SQL editor):
-       alter table order_messages add column if not exists read_by_admin boolean default false;
-       -- + admin RLS policies on order_messages (select/insert/update)
+       create table if not exists public.order_messages (
+         id uuid primary key default gen_random_uuid(),
+         order_id uuid not null references public.orders(id) on delete cascade,
+         sender text not null check (sender in ('user','admin')),
+         message text not null,
+         read_by_admin boolean not null default false,
+         created_at timestamptz not null default now()
+       );
+       alter table public.order_messages enable row level security;
+       -- + user/admin RLS policies on order_messages (select/insert/update)
        -- + alter publication supabase_realtime add table order_messages;
      ============================================================ -->
 
@@ -88,6 +107,9 @@
     <header class="adheader">
       <h1>Orders — Admin</h1>
       <div class="adheaderright">
+        <button class="adinboxbtn" onclick="adOpenInbox()" type="button" title="Chat Inbox">
+          📥 Inbox<span id="adInboxCount" class="adinboxcount" style="display:none;">0</span>
+        </button>
         <span id="adLiveClock" class="adliveclock"></span>
         <span id="adAdminEmail"></span>
         <button class="adlogoutbtn" onclick="adDoLogout()" type="button">Logout</button>
@@ -168,7 +190,7 @@
   </div>
 </div>
 
-<!-- ===== NEW: ADMIN CHAT MODAL (opens from the chat icon on order cards) ===== -->
+<!-- ===== ADMIN CHAT MODAL (opens from the chat icon on order cards, or from Inbox) ===== -->
 <div class="admodal-overlay" id="adChatModal">
   <div class="admodal-box adchatbox">
     <div class="adchathead">
@@ -180,6 +202,17 @@
       <input class="adchatinput" id="adChatInput" type="text" placeholder="Type a reply..." onkeydown="if(event.key==='Enter') adSendChatMessage();">
       <button class="adchatsend" type="button" onclick="adSendChatMessage()">Send</button>
     </div>
+  </div>
+</div>
+
+<!-- ===== NEW: ADMIN INBOX MODAL (all chats overview) ===== -->
+<div class="admodal-overlay" id="adInboxModal">
+  <div class="admodal-box adinboxbox">
+    <div class="adchathead">
+      <h3>Chat Inbox</h3>
+      <button class="adchatclose" type="button" onclick="adCloseInbox()">✕</button>
+    </div>
+    <div class="adinboxlist" id="adInboxList"></div>
   </div>
 </div>
 
@@ -209,6 +242,11 @@
   .adlogoutbtn{background:#fff;border:1.5px solid #e0e0e0;padding:8px 16px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;color:#1e2430;}
   .adlogoutbtn:hover{background:#fdecea;border-color:#e11d48;color:#e11d48;}
 
+  /* ===== NEW: Inbox header button ===== */
+  .adinboxbtn{position:relative;background:#fff;border:1.5px solid #e0e0e0;padding:8px 14px;border-radius:20px;font-size:12.5px;font-weight:700;cursor:pointer;color:#1e2430;display:inline-flex;align-items:center;gap:6px;}
+  .adinboxbtn:hover{background:#f4f6f7;}
+  .adinboxcount{background:#e11d48;color:#fff;font-size:10.5px;font-weight:800;border-radius:10px;padding:1px 6px;min-width:16px;text-align:center;line-height:1.4;}
+
   .adfilterbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;align-items:center;}
   .adfilterbtn{background:#fff;border:1.5px solid #e0e0e0;padding:8px 14px;border-radius:20px;font-size:12.5px;font-weight:700;cursor:pointer;color:#555;font-variant-numeric:tabular-nums;}
   .adfilterbtn.active{background:#0f766e;color:#fff;border-color:#0f766e;}
@@ -221,7 +259,7 @@
   .adsearchbox input{border:none;background:transparent;padding:9px 14px 9px 34px;border-radius:24px;font-size:12.5px;width:230px;outline:none;color:#1e2430;}
 
   .adorderslist{display:flex;flex-direction:column;gap:14px;}
-  .adordercard{background:#fff;border-radius:14px;border:1px solid #e7eaec;padding:16px 18px;}
+  .adordercard{background:#fff;border-radius:14px;border:1px solid #e7eaec;padding:16px 18px;margin-bottom:14px;}
   .adordertop{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px;align-items:center;}
   .adorderid{font-size:12px;color:#767e8c;font-weight:700;}
   .adorderidfull{font-weight:400;font-family:monospace;color:#aab0b8;font-size:10.5px;}
@@ -254,7 +292,7 @@
   .adordercard .adbadgerow .adpdficon.pdf-delivered{background:#eef7ff;color:#0f766e;}
   .adordercard .adbadgerow .adpdficon.pdf-shipped{background:#eef3ff;color:#2874f0;}
 
-  /* ===== NEW: chat icon on every order card + unread red dot ===== */
+  /* chat icon on every order card + unread red dot */
   .adchaticon{
     position:relative;
     cursor:pointer;
@@ -273,7 +311,7 @@
     background:#e11d48;border:2px solid #fff;
   }
 
-  /* ===== NEW: chat popup ===== */
+  /* chat popup */
   .adchatbox{max-width:420px;width:100%;height:70vh;max-height:600px;padding:0 !important;display:flex;flex-direction:column;}
   .adchathead{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #eef2f6;flex-shrink:0;}
   .adchathead h3{margin:0;font-size:15px;text-align:left;}
@@ -288,6 +326,20 @@
   .adchatinput:focus{border-color:#0f766e;}
   .adchatsend{background:#0f766e;color:#fff;border:none;border-radius:24px;padding:0 20px;font-weight:700;font-size:13px;cursor:pointer;}
   .adchatempty{text-align:center;color:#94a3b8;font-size:12.5px;padding:24px 10px;}
+
+  /* ===== NEW: Inbox popup ===== */
+  .adinboxbox{max-width:440px;width:100%;height:70vh;max-height:600px;padding:0 !important;display:flex;flex-direction:column;}
+  .adinboxlist{flex:1;overflow-y:auto;padding:6px 0;}
+  .adinboxrow{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;border-bottom:1px solid #f0f2f5;}
+  .adinboxrow:hover{background:#f8fafc;}
+  .adinboxdot{width:9px;height:9px;border-radius:50%;background:#e11d48;flex-shrink:0;}
+  .adinboxdotph{width:9px;height:9px;flex-shrink:0;}
+  .adinboxinfo{flex:1;min-width:0;}
+  .adinboxname{font-size:13.5px;font-weight:700;color:#1e2430;}
+  .adinboxoid{font-size:11.5px;color:#767e8c;font-weight:600;}
+  .adinboxpreview{font-size:12.5px;color:#767e8c;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .adinboxtime{font-size:10.5px;color:#94a3b8;flex-shrink:0;}
+  .adinboxempty{text-align:center;color:#94a3b8;font-size:13px;padding:40px 16px;}
 
   /* golden "★ N · See Rating" badge + rating popup styles */
   .adratingbadge{display:inline-flex;align-items:center;gap:4px;background:#fff8e6;color:#b7791f;border:1.5px solid #f5d78e;padding:4px 10px;border-radius:20px;font-size:11.5px;font-weight:800;cursor:pointer;flex-shrink:0;transition:background .15s,transform .1s;white-space:nowrap;}
@@ -392,9 +444,21 @@
   .admodal-no{background:#f1f3f6;color:#333;}
   .admodal-yes{background:#e11d48;color:#fff;}
 
+  /* ===== NEW: masonry-style column layout on desktop instead of
+     CSS grid — prevents a short card from stretching to match a
+     taller neighbour in the same row (no more empty gaps). ===== */
   @media(min-width:1000px){
     .addash{padding:24px 32px;}
-    .adorderslist{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+    .adorderslist{
+      column-count: 2;
+      column-gap: 16px;
+    }
+    .adorderslist .adordercard{
+      break-inside: avoid;
+      -webkit-column-break-inside: avoid;
+      display: inline-block;
+      width: 100%;
+    }
   }
 
   body.ad-admin-page .site-header,
@@ -412,7 +476,6 @@
     padding-bottom:0 !important;
     visibility:visible !important;
   }
-  
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -428,7 +491,7 @@
   var adCancelTargetId = null;
   var adShippedTargetId = null;
 
-  // ===== NEW: chat state =====
+  // chat state
   var adChatTargetId = null;      // order whose chat popup is open
   var adChatMsgs = [];            // messages of the open chat
   var adUnreadOrders = {};        // { orderId: true } = has unread customer msgs
@@ -436,7 +499,7 @@
 
   var AD_PDF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="11" x2="12" y2="17"></line><polyline points="9 14 12 17 15 14"></polyline></svg>';
 
-  // NEW: chat bubble svg icon
+  // chat bubble svg icon
   var AD_CHAT_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>';
 
   var adFilterLabels = {
@@ -480,7 +543,7 @@
     var h12 = h%12; if(h12===0) h12=12;
     return dt.getDate()+' '+months[dt.getMonth()]+', '+h12+':'+m+' '+ampm;
   }
-  // NEW: short time for chat bubbles, e.g. "6:42 PM"
+  // short time for chat bubbles, e.g. "6:42 PM"
   function fmtChatTime(d){
     var dt = new Date(d);
     var h = dt.getHours(), m = String(dt.getMinutes()).padStart(2,'0');
@@ -606,7 +669,7 @@
     document.getElementById('adAdminEmail').textContent = user.email;
     adStartClock();
     adStartSessionTimer();
-    adStartGlobalChatRealtime(); // NEW: one realtime channel for all chat
+    adStartGlobalChatRealtime(); // one realtime channel for all chat
     adLoadOrders();
   }
 
@@ -665,7 +728,7 @@
     showLogin();
   };
 
-  // ===== NEW: load which orders have unread customer messages =====
+  // load which orders have unread customer messages
   async function adLoadUnread(){
     try{
       var res = await sb.from('order_messages')
@@ -677,7 +740,7 @@
     } catch(err){ /* non-fatal */ }
   }
 
-  // ===== NEW: add/remove red dots on chat icons without re-render =====
+  // add/remove red dots on chat icons + keep inbox badge count in sync
   function adUpdateChatDots(){
     document.querySelectorAll('.adchaticon[data-order-id]').forEach(function(el){
       var id = el.getAttribute('data-order-id');
@@ -692,12 +755,26 @@
         dot.remove();
       }
     });
+    adUpdateInboxCount();
   }
 
-  // ===== NEW: ONE global realtime channel for the whole admin panel.
+  // ===== NEW: keep the header Inbox badge count in sync =====
+  function adUpdateInboxCount(){
+    var countEl = document.getElementById('adInboxCount');
+    if(!countEl) return;
+    var n = Object.keys(adUnreadOrders).length;
+    if(n > 0){
+      countEl.textContent = n;
+      countEl.style.display = 'inline-block';
+    } else {
+      countEl.style.display = 'none';
+    }
+  }
+
+  // ONE global realtime channel for the whole admin panel.
   // Any new message on ANY order reflects instantly:
   //  - popup open for that order  -> message appears in the chat + auto-read
-  //  - popup closed               -> red dot appears on that order's icon =====
+  //  - popup closed               -> red dot appears on that order's icon
   function adStartGlobalChatRealtime(){
     if(adGlobalChatChannel) return;
     adGlobalChatChannel = sb.channel('admin-chat-global')
@@ -720,7 +797,7 @@
       .subscribe();
   }
 
-  // ===== NEW: open chat popup for an order =====
+  // open chat popup for an order
   window.adOpenChat = async function(orderId){
     adChatTargetId = orderId;
     var order = allOrders.find(function(o){ return o.id === orderId; });
@@ -795,6 +872,72 @@
     }
   };
 
+  // ===== NEW: CHAT INBOX — overview of every order with a chat thread =====
+  window.adOpenInbox = async function(){
+    document.getElementById('adInboxModal').classList.add('active');
+    var listEl = document.getElementById('adInboxList');
+    listEl.innerHTML = '<div class="adinboxempty">Loading...</div>';
+
+    var res = await sb.from('order_messages')
+      .select('*')
+      .order('created_at', { ascending:false });
+
+    if(res.error){
+      listEl.innerHTML = '<div class="adinboxempty">Could not load inbox: ' + escapeHtml(res.error.message) + '</div>';
+      return;
+    }
+
+    var msgs = res.data || [];
+    var byOrder = {};
+    msgs.forEach(function(m){
+      if(!byOrder[m.order_id]){
+        byOrder[m.order_id] = { last: m, unread: 0 };
+      }
+      if(m.sender === 'user' && !m.read_by_admin){
+        byOrder[m.order_id].unread++;
+      }
+    });
+
+    var orderIds = Object.keys(byOrder);
+    if(!orderIds.length){
+      listEl.innerHTML = '<div class="adinboxempty">No chat messages yet.</div>';
+      return;
+    }
+
+    orderIds.sort(function(a,b){
+      return new Date(byOrder[b].last.created_at) - new Date(byOrder[a].last.created_at);
+    });
+
+    var html = '';
+    orderIds.forEach(function(oid){
+      var order = allOrders.find(function(o){ return o.id === oid; });
+      var addr = (order && order.address) || {};
+      var entry = byOrder[oid];
+      var last = entry.last;
+      var name = addr.name || 'Unknown Customer';
+      var shortId = order ? displayOrderId(order) : oid.split('-')[0].toUpperCase();
+      var preview = (last.sender === 'admin' ? 'You: ' : '') + last.message;
+      html += '<div class="adinboxrow" onclick="adOpenChatFromInbox(\'' + oid + '\')">'
+        + (entry.unread > 0 ? '<span class="adinboxdot"></span>' : '<span class="adinboxdotph"></span>')
+        + '<div class="adinboxinfo">'
+        + '<div class="adinboxname">' + escapeHtml(name) + ' <span class="adinboxoid">· #' + escapeHtml(shortId) + '</span></div>'
+        + '<div class="adinboxpreview">' + escapeHtml(preview) + '</div>'
+        + '</div>'
+        + '<div class="adinboxtime">' + fmtChatTime(last.created_at) + '</div>'
+        + '</div>';
+    });
+    listEl.innerHTML = html;
+  };
+
+  window.adCloseInbox = function(){
+    document.getElementById('adInboxModal').classList.remove('active');
+  };
+
+  window.adOpenChatFromInbox = function(orderId){
+    adCloseInbox();
+    adOpenChat(orderId);
+  };
+
   // ===== LOAD ORDERS =====
   window.adLoadOrders = async function(){
     var list = document.getElementById('adOrdersList');
@@ -807,7 +950,8 @@
         return;
       }
       allOrders = res.data || [];
-      await adLoadUnread(); // NEW: fetch unread info before rendering
+      await adLoadUnread();
+      adUpdateInboxCount();
       adUpdateFilterCounts();
       renderOrders();
     } catch(err){
@@ -918,7 +1062,7 @@
         pdfIconHtml = '<span class="adpdficon ' + pdfColorClass + '" title="Download Invoice PDF" onclick="adDownloadShippedInvoice(\'' + order.id + '\')">' + AD_PDF_SVG + '</span>';
       }
 
-      // ===== NEW: chat icon (every order card) with unread red dot =====
+      // chat icon (every order card) with unread red dot
       var chatIconHtml = '<span class="adchaticon" data-order-id="' + order.id + '" title="Chat with customer" onclick="adOpenChat(\'' + order.id + '\')">'
         + AD_CHAT_SVG
         + (adUnreadOrders[order.id] ? '<span class="adchatdot"></span>' : '')
