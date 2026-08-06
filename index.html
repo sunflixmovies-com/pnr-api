@@ -738,7 +738,7 @@
       // Clicking it opens the rating popup (adRatingModal).
       var ratingBadgeHtml = '';
       if(order.status === 'delivered' && order.rating){
-        ratingBadgeHtml = '<span class="adratingbadge" title="See customer rating" onclick="adOpenRatingModal(\'' + order.id + '\')">★ ' + order.rating + ' · See Rating</span>';
+       ratingBadgeHtml = '<span class="adratingbadge" style="margin-left:auto" title="See customer rating" onclick="adOpenRatingModal(\'' + order.id + '\')">★ ' + order.rating + ' · See Rating</span>';
       }
 
       var cancelledTag = '';
@@ -765,14 +765,13 @@
       } else if(order.status === 'cancelled'){
         var byText = order.cancelled_by === 'admin' ? '(by you)' : '(by Customer)';
         actionsHtml = '<span style="font-size:12.5px;color:#767e8c;">Order cancelled. ' + byText + '</span>';
-      } else if(order.status === 'delivered'){
-        actionsHtml = '<span style="font-size:12.5px;color:#767e8c;">Order delivered.</span>';
+   } else if(order.status === 'delivered'){
+        actionsHtml = '<span style="font-size:12.5px;color:#767e8c;">Order delivered.</span>' + ratingBadgeHtml;
       }
-
       html += '<div class="adordercard">'
         + '<div class="adordertop">'
         + '<div><div class="adorderid">Order ID: #' + displayOrderId(order) + '<span class="adorderidfull"> (' + order.id + ')</span></div><div class="adorderdate">' + fmtDateTime(order.created_at) + '</div></div>'
-        + '<div class="adbadgewrap"><div class="adbadgerow">' + ratingBadgeHtml + pdfIconHtml + '<span class="adbadge ' + order.status + '">' + order.status.replace('_',' ') + '</span></div>' + shippedTag + outForDeliveryTag + deliveredTag + cancelledTag + cancelRequestedTag + '</div>'
+       + '<div class="adbadgewrap"><div class="adbadgerow">' + pdfIconHtml + '<span class="adbadge ' + order.status + '">' + order.status.replace('_',' ') + '</span></div>' + shippedTag + outForDeliveryTag + deliveredTag + cancelledTag + cancelRequestedTag + '</div>'
         + '</div>'
         + (order.cancel_reason ? '<div class="adreasonline">Reason: <b>' + escapeHtml(order.cancel_reason) + '</b></div>' : '')
         + '<div class="aditemsrow">' + thumbs + '</div>'
