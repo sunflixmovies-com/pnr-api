@@ -120,6 +120,7 @@
 
     <div class="adfilterbar">
       <button class="adfilterbtn active" data-filter="all" onclick="adSetFilter('all',this)">All</button>
+      <button class="adfilterbtn" data-filter="pending_advance" onclick="adSetFilter('pending_advance',this)">Advance Pending</button>
       <button class="adfilterbtn" data-filter="placed" onclick="adSetFilter('placed',this)">Placed</button>
       <button class="adfilterbtn" data-filter="cancel_requested" onclick="adSetFilter('cancel_requested',this)">Cancel Requests</button>
       <button class="adfilterbtn" data-filter="shipped" onclick="adSetFilter('shipped',this)">Shipped</button>
@@ -300,6 +301,18 @@
   .adbadge.shipped{background:#eef3ff;color:#2874f0;}
   .adbadge.out_for_delivery{background:#fdf4ff;color:#9333ea;}
   .adbadge.delivered{background:#eef7ff;color:#0f766e;}
+  .adbadge.pending_advance{background:#fff7e6;color:#b8860b;}
+  /* ===== ADVANCE PAYMENT (₹49) VERIFY BOX ===== */
+  .adadvbox{margin-top:12px;padding:12px 14px;border:1.5px dashed #b8860b;border-radius:12px;background:#fffdf5;}
+  .adadvtitle{font-size:13px;font-weight:800;color:#8a6508;margin-bottom:4px;}
+  .adadvsub{font-size:12.5px;color:#767e8c;font-weight:600;margin-bottom:10px;line-height:1.5;}
+  .adadvactions{display:flex;gap:8px;flex-wrap:wrap;}
+  .adadvbtn{border:none;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit;
+    display:inline-flex;align-items:center;gap:6px;}
+  .adadvbtn.ok{background:#1a7f37;color:#fff;}
+  .adadvbtn.no{background:#e11d48;color:#fff;}
+  .adadvdone{font-size:12.5px;font-weight:800;color:#1a7f37;}
+  .adadvfail{font-size:12.5px;font-weight:800;color:#e11d48;}
 
   /* right-aligned badge column, stays right even when the row wraps */
   .adbadgewrap{display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-left:auto;}
@@ -557,6 +570,7 @@
 
   var adFilterLabels = {
     all: 'All',
+    pending_advance: 'Advance Pending',
     placed: 'Placed',
     cancel_requested: 'Cancel Requests',
     shipped: 'Shipped',
@@ -565,7 +579,7 @@
     cancelled: 'Cancelled'
   };
   function adUpdateFilterCounts(){
-    var counts = { all: allOrders.length, placed:0, cancel_requested:0, shipped:0, out_for_delivery:0, delivered:0, cancelled:0 };
+    var counts = { all: allOrders.length, pending_advance:0, placed:0, cancel_requested:0, shipped:0, out_for_delivery:0, delivered:0, cancelled:0 };
     allOrders.forEach(function(o){
       if(counts.hasOwnProperty(o.status)) counts[o.status]++;
     });
@@ -1156,6 +1170,29 @@
         actionsHtml = '<span style="font-size:12.5px;color:#767e8c;align-self:center;">Order delivered.</span>' + ratingBadgeHtml;
       }
 
+      // ===== ADVANCE ₹49 VERIFY BLOCK (COD orders) =====
+      var advanceBoxHtml = '';
+      if(order.payment_method === 'cod' && (order.advance_status || order.status === 'pending_advance')){
+        var advAmt = order.advance_amount || 49;
+        var codDue = (order.cod_due != null) ? order.cod_due : Math.max((order.total_amount||0) - advAmt, 0);
+        var advInner = '';
+        if(order.advance_status === 'received'){
+          advInner = '<div class="adadvdone">\u2713 Advance ' + money(advAmt) + ' received' + (order.advance_checked_at ? ' \u2014 ' + fmtDateShortTime(order.advance_checked_at) : '') + '</div>';
+        } else if(order.advance_status === 'not_received'){
+          advInner = '<div class="adadvfail">\u2715 Advance not received \u2014 order cancelled</div>';
+        } else {
+          advInner = '<div class="adadvactions">'
+            + '<button class="adadvbtn ok" onclick="adAdvanceDone(\'' + order.id + '\')">\u2713 Payment Done</button>'
+            + '<button class="adadvbtn no" onclick="adAdvanceNotDone(\'' + order.id + '\')">\u2715 Not Payment Done</button>'
+            + '</div>';
+        }
+        advanceBoxHtml = '<div class="adadvbox">'
+          + '<div class="adadvtitle">Advance Payment ' + money(advAmt) + ' (UPI)</div>'
+          + '<div class="adadvsub">Check karo ki is order ka ' + money(advAmt) + ' advance aapko mila hai ya nahi. Cash on delivery balance: <b>' + money(codDue) + '</b></div>'
+          + advInner
+          + '</div>';
+      }
+
       html += '<div class="adordercard">'
         + '<div class="adordertop">'
         + '<div><div class="adorderid">Order ID: #' + displayOrderId(order) + '<span class="adorderidfull"> (' + order.id + ')</span></div><div class="adorderdate">' + fmtDateTime(order.created_at) + '</div></div>'
@@ -1167,6 +1204,7 @@
         + '<div class="ademail">Email: <b>' + escapeHtml(order.user_email || '—') + '</b></div>'
         + '<div class="adaddr">' + [addr.house, addr.road, addr.city + ', ' + addr.state + ' ' + addr.pincode].filter(Boolean).map(escapeHtml).join(', ') + '</div>'
         + '<div class="adcustomer">Total: <b>' + money(order.total_amount) + '</b> · ' + (order.payment_method === 'cod' ? 'Cash on Delivery' : (order.payment_method||'').toUpperCase()) + '</div>'
+        + advanceBoxHtml
         + (order.status !== 'delivered' && order.status !== 'cancelled' ? (
           '<div class="addeliveryrow">'
           + '<label>Delivery date:</label>'
@@ -1206,6 +1244,48 @@
 
   window.adCloseRatingModal = function(){
     document.getElementById('adRatingModal').classList.remove('active');
+  };
+
+  // ===== ADVANCE PAYMENT VERIFY ACTIONS =====
+  // Mila -> advance received + order 'placed' (customer ka tracker auto update)
+  window.adAdvanceDone = async function(orderId){
+    if(!confirm('Is order ka ₹49 advance payment aapko mil gaya hai?')) return;
+    adShowLoader();
+    var res = await sb.from('orders').update({
+      advance_status: 'received',
+      advance_checked_at: new Date().toISOString(),
+      status: 'placed'
+    }).eq('id', orderId).select();
+    if(!res.data || !res.data.length){
+      adHideLoader();
+      adShowToast('Could not update — order state may have changed.', true);
+      return;
+    }
+    await adLoadOrders();
+    adHideLoader();
+    adShowToast('Advance Payment Received — Order Placed', false);
+  };
+
+  // Nahi mila -> advance not received + order auto cancel
+  window.adAdvanceNotDone = async function(orderId){
+    if(!confirm('Advance payment NAHI mila? Order cancel ho jaayega.')) return;
+    adShowLoader();
+    var res = await sb.from('orders').update({
+      advance_status: 'not_received',
+      advance_checked_at: new Date().toISOString(),
+      status: 'cancelled',
+      cancelled_by: 'admin',
+      cancelled_at: new Date().toISOString(),
+      cancel_reason: 'Advance payment not received'
+    }).eq('id', orderId).select();
+    if(!res.data || !res.data.length){
+      adHideLoader();
+      adShowToast('Could not update — order state may have changed.', true);
+      return;
+    }
+    await adLoadOrders();
+    adHideLoader();
+    adShowToast('Advance not received — Order Cancelled', false);
   };
 
   // ===== ACTIONS =====
