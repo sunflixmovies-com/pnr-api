@@ -1,3 +1,0 @@
-# Empty commit करो (trigger new build)
-git commit --allow-empty -m "Trigger new build"
-git push
