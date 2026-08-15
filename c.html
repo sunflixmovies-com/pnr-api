@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MyStore E-commerce Code Checker</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;font-family:Arial,Helvetica,sans-serif;background:#f4f6f8;color:#111}
+button,textarea,input{font:inherit}
+button{cursor:pointer}
+.topbar{height:58px;background:#111827;color:#fff;display:flex;align-items:center;padding:0 16px;gap:14px;position:sticky;top:0;z-index:50}
+.logo{font-size:18px;font-weight:800;white-space:nowrap}
+.logo span{color:#22c55e}
+.top-actions{margin-left:auto;display:flex;gap:8px}
+.top-btn{border:1px solid #374151;background:#1f2937;color:#fff;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700}
+.top-btn:hover{background:#374151}
+.layout{display:grid;grid-template-columns:minmax(360px,48%) 1fr;min-height:calc(100vh - 58px)}
+.left{background:#fff;border-right:1px solid #dfe3e8;display:flex;flex-direction:column;min-width:0}
+.editor-head{height:52px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #e5e7eb;gap:10px}
+.editor-head b{font-size:13px}
+.status-pill{margin-left:auto;padding:5px 9px;border-radius:999px;font-size:11px;font-weight:800;background:#eef2f7;color:#64748b}
+.status-pill.ok{background:#dcfce7;color:#166534}
+.status-pill.bad{background:#fee2e2;color:#991b1b}
+#code{flex:1;width:100%;min-height:400px;resize:none;border:0;outline:0;padding:16px;background:#fff;color:#111827;font:13px/1.55 Consolas,Monaco,"Courier New",monospace;tab-size:2}
+.editor-foot{padding:10px 12px;border-top:1px solid #e5e7eb;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.run{background:#16a34a;color:#fff;border:0;border-radius:8px;padding:10px 16px;font-weight:800}
+.run:hover{background:#15803d}
+.secondary{background:#fff;color:#111827;border:1px solid #d1d5db;border-radius:8px;padding:10px 13px;font-weight:700}
+.secondary:hover{background:#f9fafb}
+.hint{font-size:10px;color:#6b7280;margin-left:auto}
+.right{min-width:0;display:flex;flex-direction:column;background:#f8fafc}
+.preview-head{height:52px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #dfe3e8;background:#fff;gap:10px}
+.preview-head b{font-size:13px}
+.tabs{margin-left:auto;display:flex;gap:5px}
+.tab{border:1px solid #d1d5db;background:#fff;padding:6px 10px;border-radius:7px;font-size:11px;font-weight:700}
+.tab.active{background:#111827;color:#fff;border-color:#111827}
+.preview-wrap{height:54%;min-height:330px;background:#e9edf1;padding:12px}
+#preview{width:100%;height:100%;border:1px solid #cfd5dc;background:#fff;border-radius:8px}
+.results{height:46%;min-height:270px;background:#fff;border-top:1px solid #dfe3e8;overflow:auto}
+.result-summary{display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid #eee;position:sticky;top:0;background:#fff;z-index:2}
+.result-summary b{font-size:13px}
+.count{padding:4px 8px;border-radius:999px;font-size:10px;font-weight:800;background:#eef2f7;color:#475569}
+.count.error{background:#fee2e2;color:#991b1b}
+.count.warn{background:#fef3c7;color:#92400e}
+.issue{display:flex;gap:10px;padding:10px 14px;border-bottom:1px solid #f0f0f0;font-size:12px}
+.issue .icon{width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:50%;font-weight:900;flex:0 0 22px}
+.issue.error .icon{background:#fee2e2;color:#b91c1c}
+.issue.warn .icon{background:#fef3c7;color:#a16207}
+.issue.info .icon{background:#dbeafe;color:#1d4ed8}
+.issue.ok .icon{background:#dcfce7;color:#15803d}
+.issue b{display:block;margin-bottom:3px}
+.issue small{color:#6b7280;line-height:1.45}
+.empty{padding:28px 16px;text-align:center;color:#64748b;font-size:12px}
+.code-box{margin:10px 14px;padding:10px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;white-space:pre-wrap;font:11px/1.5 Consolas,monospace;color:#334155;display:none}
+@media(max-width:900px){
+.layout{grid-template-columns:1fr;display:flex;flex-direction:column}
+.left{height:55vh;min-height:430px;border-right:0;border-bottom:1px solid #dfe3e8}
+.right{height:45vh;min-height:420px}
+.preview-wrap{height:58%;min-height:250px}
+.results{height:42%;min-height:170px}
+.hint{width:100%;margin-left:0}
+.top-actions .top-btn:nth-child(2){display:none}
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="logo">MyStore <span>Code Checker</span></div>
+  <div class="top-actions">
+    <button class="top-btn" onclick="loadDemo()">Demo</button>
+    <button class="top-btn" onclick="clearCode()">Clear</button>
+  </div>
+</header>
+
+<main class="layout">
+<section class="left">
+  <div class="editor-head">
+    <b>HTML / CSS / JavaScript</b>
+    <span id="status" class="status-pill">Ready</span>
+  </div>
+  <textarea id="code" spellcheck="false" placeholder="Paste your e-commerce HTML code here..."></textarea>
+  <div class="editor-foot">
+    <button class="run" onclick="runCheck()">▶ Check & Preview</button>
+    <button class="secondary" onclick="formatBasic()">Format</button>
+    <button class="secondary" onclick="copyCode()">Copy</button>
+    <span class="hint">Ctrl + Enter = Check & Preview</span>
+  </div>
+</section>
+
+<section class="right">
+  <div class="preview-head">
+    <b>Live Preview</b>
+    <div class="tabs">
+      <button id="tabPreview" class="tab active" onclick="showPreview()">Preview</button>
+      <button id="tabReport" class="tab" onclick="showReport()">Report</button>
+    </div>
+  </div>
+  <div id="previewWrap" class="preview-wrap">
+    <iframe id="preview" title="Live preview"></iframe>
+  </div>
+  <div id="results" class="results">
+    <div class="result-summary">
+      <b>Code Check</b><span id="errorCount" class="count">0 errors</span><span id="warnCount" class="count">0 warnings</span>
+    </div>
+    <div id="issueList" class="empty">Paste your product / checkout / cart / account page code and click <b>Check & Preview</b>.</div>
+  </div>
+</section>
+</main>
+
+<script>
+const SUPABASE_URL="https://bszojvhitsoamhksyjul.supabase.co";
+const SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJzem9qdmhpdHNvYW1oa3N5anVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY1OTY0OTMsImV4cCI6MjEwMjE3MjQ5M30.QW1vat89dYrOYY0U8Bk6BwAcunTIISduPhk7ngz3iBE";
+
+const codeEl=document.getElementById("code");
+const preview=document.getElementById("preview");
+const issueList=document.getElementById("issueList");
+const statusEl=document.getElementById("status");
+let issues=[];
+
+function addIssue(type,title,detail="",line=""){
+  issues.push({type,title,detail,line});
+}
+function escapeHtml(s){
+  return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
+}
+function setStatus(text,type=""){
+  statusEl.textContent=text;
+  statusEl.className="status-pill "+type;
+}
+function stripComments(s){return s.replace(/<!--[\s\S]*?-->/g,"");}
+
+function basicStaticCheck(code){
+  const clean=stripComments(code);
+
+  if(!clean.trim()){
+    addIssue("error","No code pasted","Paste the complete HTML file first.");
+    return;
+  }
+
+  if(!/<html[\s>]/i.test(clean)) addIssue("warn","<html> tag not found","The checker works best with a complete HTML document.");
+  if(!/<head[\s>]/i.test(clean)) addIssue("warn","<head> tag not found","Meta tags, styles and external resources may be missing.");
+  if(!/<body[\s>]/i.test(clean)) addIssue("warn","<body> tag not found","A complete page normally contains a body.");
+  if(!/<\/html\s*>/i.test(clean)) addIssue("warn","Closing </html> tag not found","Check whether the file was pasted completely.");
+
+  const opens=(clean.match(/<script\b/gi)||[]).length;
+  const closes=(clean.match(/<\/script>/gi)||[]).length;
+  if(opens!==closes) addIssue("error","Script tag mismatch",`Found ${opens} opening <script> tag(s) but ${closes} closing tag(s).`);
+
+  const styleOpen=(clean.match(/<style\b/gi)||[]).length;
+  const styleClose=(clean.match(/<\/style>/gi)||[]).length;
+  if(styleOpen!==styleClose) addIssue("error","Style tag mismatch",`Found ${styleOpen} opening <style> tag(s) but ${styleClose} closing tag(s).`);
+
+  const braces=(clean.match(/{/g)||[]).length-(clean.match(/}/g)||[]).length;
+  if(braces!==0) addIssue("error","JavaScript/CSS brace mismatch",`Opening and closing brace count differs by ${Math.abs(braces)}.`);
+
+  const parens=(clean.match(/\(/g)||[]).length-(clean.match(/\)/g)||[]).length;
+  if(parens!==0) addIssue("error","Parenthesis mismatch",`Opening and closing parenthesis count differs by ${Math.abs(parens)}.`);
+
+  const brackets=(clean.match(/\[/g)||[]).length-(clean.match(/\]/g)||[]).length;
+  if(brackets!==0) addIssue("error","Bracket mismatch",`Opening and closing square bracket count differs by ${Math.abs(brackets)}.`);
+
+  const ids=[...clean.matchAll(/\bid\s*=\s*["']([^"']+)["']/gi)].map(x=>x[1]);
+  const seen=new Set(),dupes=new Set();
+  ids.forEach(x=>{if(seen.has(x))dupes.add(x);seen.add(x)});
+  if(dupes.size) addIssue("warn","Duplicate HTML id found",[...dupes].slice(0,8).join(", "),"Duplicate IDs can make getElementById/querySelector target the wrong element.");
+
+  const hrefs=[...clean.matchAll(/\bhref\s*=\s*["']#([^"']+)["']/gi)].map(x=>x[1]);
+  const idSet=new Set(ids);
+  const missingAnchors=hrefs.filter(x=>x && !idSet.has(x));
+  if(missingAnchors.length) addIssue("warn","Broken internal link target",missingAnchors.slice(0,8).join(", "));
+
+  if(/https?:\/\/[^"'\s]+/i.test(clean)) addIssue("info","External resources detected","The live preview will try to load CDN/API resources.");
+  if(/supabase\.co/i.test(clean)){
+    addIssue("info","Supabase detected","The checker will let the pasted page connect to its configured Supabase project.");
+    if(!/createClient\s*\(/i.test(clean)) addIssue("warn","Supabase URL found but createClient() was not detected","Check the Supabase initialization.");
+  }
+
+  if(/const\s+SUPABASE_(URL|KEY)\s*=\s*["'][^"']+["']/i.test(clean)){
+    addIssue("info","Supabase configuration detected","Your existing Supabase URL/key will be kept; the checker does not replace it.");
+  }
+
+  if(/onclick\s*=\s*["'][^"']+["']/i.test(clean)){
+    const funcs=[...clean.matchAll(/onclick\s*=\s*["']\s*([A-Za-z_$][\w$]*)\s*\(/gi)].map(x=>x[1]);
+    funcs.forEach(fn=>{
+      const re=new RegExp("(function\\s+"+fn+"\\s*\\(|(?:const|let|var)\\s+"+fn+"\\s*=|window\\."+fn+"\\s*=)","i");
+      if(!re.test(clean)) addIssue("warn","Possible missing onclick function",fn+"() is used in onclick but its definition was not found in the pasted code.");
+    });
+  }
+
+  if(/<img\b/i.test(clean) && !/<img[^>]+alt\s*=/i.test(clean)) addIssue("warn","Images without alt text detected","Not a runtime error, but useful for accessibility.");
+}
+
+function runPreview(code){
+  window.__checkerMessages=[];
+  const marker=`<script>
+  (function(){
+    function send(type,args){
+      try{ parent.postMessage({__mystoreChecker:true,type,detail:Array.from(args).map(function(x){return x&&x.stack?x.stack:String(x)}).join(" ")}, "*"); }catch(e){}
+    }
+    window.addEventListener("error",function(e){
+      send("runtime-error",[e.message+" @ "+(e.filename||"iframe")+":"+e.lineno]);
+    });
+    window.addEventListener("unhandledrejection",function(e){
+      send("runtime-error",["Unhandled Promise rejection:",e.reason&&e.reason.stack||e.reason]);
+    });
+    var oldError=console.error;
+    console.error=function(){send("console-error",arguments);oldError.apply(console,arguments)};
+  })();
+  <\/script>`;
+  let html=code;
+  if(/<head[\s>]/i.test(html)) html=html.replace(/<head[^>]*>/i, m=>m+marker);
+  else html=marker+html;
+
+  preview.srcdoc=html;
+}
+
+window.addEventListener("message",e=>{
+  if(!e.data || !e.data.__mystoreChecker) return;
+  const type=e.data.type;
+  if(type==="runtime-error"){
+    addIssue("error","Runtime JavaScript error",e.data.detail);
+    renderIssues();
+    setStatus("Runtime error","bad");
+  }else if(type==="console-error"){
+    addIssue("error","console.error() reported",e.data.detail);
+    renderIssues();
+    setStatus("Console error","bad");
+  }
+});
+
+function renderIssues(){
+  const errors=issues.filter(x=>x.type==="error").length;
+  const warns=issues.filter(x=>x.type==="warn").length;
+  const infos=issues.filter(x=>x.type==="info").length;
+  document.getElementById("errorCount").textContent=errors+" error"+(errors===1?"":"s");
+  document.getElementById("warnCount").textContent=warns+" warning"+(warns===1?"":"s");
+  document.getElementById("errorCount").className="count"+(errors?" error":"");
+  document.getElementById("warnCount").className="count"+(warns?" warn":"");
+
+  if(!issues.length){
+    issueList.className="empty";
+    issueList.innerHTML="✓ No obvious problems found by the static checker. Test the page in the Live Preview too.";
+    setStatus("Looks good","ok");
+    return;
+  }
+  issueList.className="";
+  issueList.innerHTML=issues.map(x=>{
+    const icon=x.type==="error"?"!":x.type==="warn"?"!":"i";
+    return `<div class="issue ${x.type}">
+      <div class="icon">${icon}</div>
+      <div><b>${escapeHtml(x.title)}</b><small>${escapeHtml(x.detail||"")}${x.line?`<br>${escapeHtml(x.line)}`:""}</small></div>
+    </div>`;
+  }).join("");
+  if(errors)setStatus(errors+" error"+(errors===1?"":"s"),"bad");
+  else if(warns)setStatus(warns+" warning"+(warns===1?"":"s"),"bad");
+  else setStatus("Checked","ok");
+}
+
+function runCheck(){
+  issues=[];
+  const code=codeEl.value;
+  basicStaticCheck(code);
+  if(code.trim()) runPreview(code);
+  renderIssues();
+  showPreview();
+}
+
+function showPreview(){
+  document.getElementById("previewWrap").style.display="";
+  document.getElementById("results").style.display="";
+  document.getElementById("tabPreview").classList.add("active");
+  document.getElementById("tabReport").classList.remove("active");
+}
+function showReport(){
+  document.getElementById("previewWrap").style.display="none";
+  document.getElementById("results").style.display="block";
+  document.getElementById("tabPreview").classList.remove("active");
+  document.getElementById("tabReport").classList.add("active");
+}
+function clearCode(){
+  codeEl.value="";
+  issues=[];
+  preview.srcdoc="";
+  renderIssues();
+  setStatus("Ready");
+}
+function copyCode(){
+  navigator.clipboard.writeText(codeEl.value).then(()=>setStatus("Copied","ok")).catch(()=>setStatus("Copy failed","bad"));
+}
+function formatBasic(){
+  let s=codeEl.value;
+  s=s.replace(/>\s*</g,">\n<").replace(/^\s+|\s+$/g,"");
+  codeEl.value=s;
+  setStatus("Formatted","ok");
+}
+function loadDemo(){
+  codeEl.value=`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MyStore Test Product</title>
+<style>
+body{font-family:Arial;margin:0;background:#f5f6f8;padding:30px}
+.card{max-width:520px;margin:auto;background:#fff;border-radius:18px;padding:24px;box-shadow:0 10px 30px #0001}
+.price{font-size:30px;font-weight:800}
+.delivery{margin-top:20px;padding:14px;background:#f2f7ff;border-radius:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+button{margin-top:20px;padding:12px 18px;border:0;border-radius:10px;background:#111;color:#fff}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>MyStore Product</h1>
+<div class="price">₹199</div>
+<div class="delivery" id="address">Village, District, Uttar Pradesh, 226002, 7MR2QXW3+XXX</div>
+<button onclick="buyNow()">Buy Now</button>
+</div>
+<script>
+function buyNow(){console.log("Demo Buy Now clicked");}
+<\/script>
+</body>
+</html>`;
+  runCheck();
+}
+codeEl.addEventListener("keydown",e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){e.preventDefault();runCheck();}
+});
+window.addEventListener("load",()=>{
+  const saved=localStorage.getItem("mystore_checker_code");
+  if(saved) codeEl.value=saved;
+});
+codeEl.addEventListener("input",()=>localStorage.setItem("mystore_checker_code",codeEl.value));
+</script>
+</body>
+</html>
